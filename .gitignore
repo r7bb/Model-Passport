@@ -14,7 +14,11 @@ build/
 .env
 .env.*
 
-# Local data and artifacts
+# Local data and generated artifacts
 data/
 models/
 mlruns/
+mlflow.db
+/passport.json
+/passport.html
+/passport.jsonld

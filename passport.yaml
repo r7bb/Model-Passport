@@ -1,0 +1,76 @@
+# Demo pipeline: synthetic census-style income classifier.
+#
+#   python demo/make_dataset.py        # synthetic data with injected fake PII
+#   passport run                       # safe settings (drop identifiers, generalize, regularize)
+#   passport build && passport verify
+#
+# Unsafe variant for the demo story (expected verdict: fail):
+#   passport run --set preprocess.drop_identifiers=false --set preprocess.generalize=false \
+#                --set train.model=overfit
+
+project:
+  name: income-classifier
+  version: 1.0.0
+
+signing:
+  private_key: .passport/signing_key.pem   # never commit this file
+  public_key: .passport/signing_key.pub
+
+tracking:
+  mlflow_uri: null        # e.g. http://localhost:5000 with docker compose
+  mlflow_experiment: null
+  dvc: false
+
+stages:
+  - name: preprocess
+    cmd: python demo/preprocess.py
+    params:
+      drop_identifiers: true
+      generalize: true
+      test_size: 0.25
+      seed: 7
+    deps: [data/raw.csv]
+    outs: [data/train.csv, data/test.csv]
+
+  - name: train
+    cmd: python demo/train.py
+    params:
+      model: regularized
+      seed: 7
+    deps: [data/train.csv]
+    outs: [models/model.pkl, models/model_info.json]
+
+  - name: evaluate
+    cmd: python demo/evaluate.py
+    deps: [models/model.pkl, data/train.csv, data/test.csv]
+    outs: [models/metrics.json]
+    metrics: models/metrics.json
+
+declared:
+  intended_use: >-
+    Demonstration of Model Passport on a synthetic income classification task.
+  out_of_scope_uses:
+    - Any real lending, hiring, or eligibility decision.
+  known_limitations:
+    - Trained on synthetic data; performance does not transfer to real populations.
+  ethical_risks:
+    - Income prediction can encode demographic bias if used on real data.
+  owner: Model Passport team
+  contact: null
+
+build:
+  model:
+    path: models/model.pkl
+    metadata: models/model_info.json
+  datasets:
+    - path: data/train.csv
+      split_role: train
+      source: demo/make_dataset.py (synthetic)
+      license: MIT
+    - path: data/test.csv
+      split_role: test
+      source: demo/make_dataset.py (synthetic)
+      license: MIT
+  artifacts:
+    - path: demo/make_dataset.py
+      kind: script

@@ -3,7 +3,7 @@ Model Passport is an MLOps tool that wraps an ML training pipeline and produces 
 
 ## Status
 
-Phase 1 (core passport and identity) is implemented: schema, SHA256 artifact hashing, Merkle root, Ed25519 signing, and the `init`, `build`, and `verify` commands.
+Phases 1 and 2 are implemented: the signed passport (schema, SHA256 hashing, Merkle root, Ed25519 signing, `init`, `build`, `verify`) and provenance capture (`passport run`, with git, environment, optional MLflow and DVC). See [ROADMAP.md](ROADMAP.md).
 
 ## Setup
 
@@ -11,16 +11,27 @@ Requires Python 3.11+.
 
 ```bash
 python3.11 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e ".[dev,demo]"
 ```
 
 ## Quickstart
 
 ```bash
 passport init --name my-model     # writes passport.yaml and a signing keypair in .passport/
-# edit passport.yaml: model path, datasets, scripts, metrics, declared fields
+# edit passport.yaml: stages, model path, datasets, declared fields
+passport run                      # runs stages, records scripts, params, inputs, outputs, git state
 passport build                    # hashes artifacts, signs, writes passport.json
 passport verify passport.json     # exits 1 and names any changed or missing file
+```
+
+Stage parameters are passed to scripts as JSON in `$PASSPORT_PARAMS`; read them with `model_passport.runtime.params(defaults)`. Override them per run with `passport run --set train.model=overfit`.
+
+## Demo
+
+```bash
+python demo/make_dataset.py       # synthetic income data with injected fake PII (Faker)
+passport init
+passport run && passport build && passport verify
 ```
 
 The private key in `.passport/` is gitignored and must never be committed. Set `PASSPORT_KEY_PASSPHRASE` to encrypt it at rest.
