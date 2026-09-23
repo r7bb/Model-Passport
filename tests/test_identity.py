@@ -48,7 +48,7 @@ def test_merkle_root_odd_leaf_not_duplicated() -> None:
 
 
 def test_merkle_root_rejects_empty() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least one artifact"):
         identity.merkle_root([])
 
 
@@ -59,7 +59,7 @@ def test_canonical_json_is_deterministic() -> None:
 
 
 def test_canonical_json_rejects_nan() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not JSON compliant"):
         identity.canonical_json({"x": float("nan")})
 
 
@@ -100,5 +100,5 @@ def test_keypair_passphrase(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     identity.load_private_key(priv)
 
     monkeypatch.setenv(identity.PASSPHRASE_ENV, "wrong")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"(?i)incorrect password|bad decrypt"):
         identity.load_private_key(priv)

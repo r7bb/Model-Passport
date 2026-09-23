@@ -15,11 +15,11 @@ import pytest
 pytest.importorskip("sklearn")
 pytest.importorskip("faker")
 
-from model_passport.core import identity  # noqa: E402
-from model_passport.core.builder import build_passport, write_passport  # noqa: E402
-from model_passport.core.capture import run_pipeline, save_run_record  # noqa: E402
-from model_passport.core.config import load_config  # noqa: E402
-from model_passport.core.verifier import verify_passport  # noqa: E402
+from model_passport.core import identity
+from model_passport.core.builder import build_passport, write_passport
+from model_passport.core.capture import run_pipeline, save_run_record
+from model_passport.core.config import load_config
+from model_passport.core.verifier import verify_passport
 
 REPO = Path(__file__).resolve().parents[1]
 UNSAFE = {

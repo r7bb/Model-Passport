@@ -12,7 +12,7 @@ from model_passport.core.builder import BuildError, build_passport
 from model_passport.core.config import CONFIG_FILENAME, StageConfig, TrackingConfig, load_config
 from model_passport.core.tracking import (
     MlflowTracker,
-    TrackingUnavailable,
+    TrackingUnavailableError,
     dvc_add,
     resolve_tracking_uri,
 )
@@ -95,7 +95,8 @@ def test_run_pipeline_records_stages(pipeline_project: Path) -> None:
     assert [s.name for s in record.stages] == ["one", "two"]
     one, two = record.stages
     assert one.parameters == {"factor": 3}
-    assert one.command[0].startswith("python") and one.command[1:] == ["one.py"]
+    assert one.command[0].startswith("python")
+    assert one.command[1:] == ["one.py"]
     assert [i.path for i in one.inputs] == ["in.txt"]
     assert [o.path for o in one.outputs] == ["mid.txt"]
     assert (pipeline_project / "mid.txt").read_text() == "63"
@@ -140,7 +141,8 @@ def test_git_commit_and_dirty_state(pipeline_project: Path) -> None:
     git("-c", "user.email=t@example.com", "-c", "user.name=t", "add", "one.py", "two.py")
     git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "init")
     commit = capture.git_commit(root)
-    assert commit and len(commit) == 40
+    assert commit
+    assert len(commit) == 40
     assert capture.git_is_dirty(root, Path("one.py")) is False
     (root / "one.py").write_text(STAGE_ONE + "\n# edit\n")
     assert capture.git_is_dirty(root, Path("one.py")) is True
@@ -187,7 +189,7 @@ def test_build_rejects_stale_stage_config(pipeline_project: Path) -> None:
 def test_build_rejects_output_modified_after_run(pipeline_project: Path) -> None:
     _run(pipeline_project)
     (pipeline_project / "mid.txt").write_text("999")
-    with pytest.raises(BuildError, match="mid.txt changed since"):
+    with pytest.raises(BuildError, match=r"mid\.txt changed since"):
         build_passport(pipeline_project / CONFIG_FILENAME)
 
 
@@ -206,7 +208,7 @@ def test_resolve_tracking_uri(tmp_path: Path) -> None:
 def test_dvc_add_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dvc_add(tmp_path, [])  # nothing to track is a no-op
     monkeypatch.setattr("shutil.which", lambda _: None)
-    with pytest.raises(TrackingUnavailable, match="not installed"):
+    with pytest.raises(TrackingUnavailableError, match="not installed"):
         dvc_add(tmp_path, [Path("x")])
 
 
@@ -221,7 +223,7 @@ def test_dvc_add_invokes_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     dvc_add(tmp_path, [Path("data/train.csv")])
-    assert calls == [["dvc", "add", "data/train.csv"]]
+    assert calls == [["/usr/bin/dvc", "add", "data/train.csv"]]
 
 
 def test_mlflow_tracker_logs_stages(pipeline_project: Path) -> None:
@@ -235,7 +237,7 @@ def test_mlflow_tracker_logs_stages(pipeline_project: Path) -> None:
     record = capture.run_pipeline(
         pipeline_project,
         config,
-        on_stage=lambda stage, rec, metrics: tracker.log_stage(stage, rec, metrics),
+        on_stage=tracker.log_stage,
     )
     tracker.finish()
 
@@ -251,5 +253,5 @@ def test_mlflow_tracker_logs_stages(pipeline_project: Path) -> None:
 
 
 def test_mlflow_tracker_requires_uri(tmp_path: Path) -> None:
-    with pytest.raises(TrackingUnavailable):
+    with pytest.raises(TrackingUnavailableError):
         MlflowTracker(TrackingConfig(), tmp_path, "demo")

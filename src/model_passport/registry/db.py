@@ -125,7 +125,7 @@ class RegistryDB:
         ).fetchone()
         return self._row(row) if row else None
 
-    def list(
+    def search(
         self, model_name: str | None = None, verdict: str | None = None, limit: int = 200
     ) -> list[StoredPassport]:
         clauses, params = [], []

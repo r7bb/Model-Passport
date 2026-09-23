@@ -26,7 +26,7 @@ def per_sample_loss(model: Any, frame: pd.DataFrame, label: str) -> np.ndarray:
     features = frame.drop(columns=[label])
     try:
         proba = np.asarray(model.predict_proba(features))
-    except Exception as exc:  # noqa: BLE001 - surface any model error as an audit error
+    except Exception as exc:
         raise LeakageAuditError(f"predict_proba failed: {exc}") from exc
     classes = list(model.classes_)
     index = {c: i for i, c in enumerate(classes)}
@@ -34,7 +34,7 @@ def per_sample_loss(model: Any, frame: pd.DataFrame, label: str) -> np.ndarray:
     if (y < 0).any():
         raise LeakageAuditError(f"labels not seen by the model: {set(frame[label]) - set(classes)}")
     p_true = proba[np.arange(len(y)), y]
-    return -np.log(np.clip(p_true, EPS, 1.0))
+    return np.asarray(-np.log(np.clip(p_true, EPS, 1.0)), dtype=float)
 
 
 def tpr_at_fpr(labels: np.ndarray, scores: np.ndarray, max_fpr: float) -> float:

@@ -13,6 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import joblib
+from picklescan.scanner import SafetyLevel, scan_file_path
+
 from model_passport.core.schema import DependencyAudit, Finding, Severity
 
 PICKLE_SUFFIXES = {".pkl", ".pickle", ".joblib", ".pt", ".pth", ".ckpt", ".bin", ".npy"}
@@ -54,16 +57,6 @@ def scan_model_file(path: Path, label: str | None = None) -> list[Finding]:
             Finding(
                 scanner="artifact", category="UNKNOWN_FORMAT", severity=Severity.LOW,
                 location=label, message=f"cannot verify load safety of {suffix or 'no suffix'}",
-            )
-        ]  # fmt: skip
-
-    try:
-        from picklescan.scanner import SafetyLevel, scan_file_path
-    except ImportError:
-        return [
-            Finding(
-                scanner="artifact", category="SCAN_UNAVAILABLE", severity=Severity.MEDIUM,
-                location=label, message="picklescan is not installed",
             )
         ]  # fmt: skip
 
@@ -115,14 +108,10 @@ def safe_load_pickle(path: Path) -> Any:
     blocking = [f for f in findings if f.category in {"UNSAFE_PICKLE", "SCAN_ERROR"}]
     if blocking:
         raise UnsafeArtifactError(f"refusing to load {path.name}: {blocking[0].message}")
-    if any(f.category == "SCAN_UNAVAILABLE" for f in findings):
-        raise UnsafeArtifactError(f"refusing to load {path.name}: picklescan is not installed")
     if path.suffix.lower() == ".joblib":
-        import joblib
-
         return joblib.load(path)
     with path.open("rb") as fh:
-        return pickle.load(fh)  # noqa: S301 - scanned above
+        return pickle.load(fh)  # noqa: S301 - opcode scan above found no dangerous imports
 
 
 # --- Dependency audit ----------------------------------------------------------------------
@@ -130,15 +119,16 @@ def safe_load_pickle(path: Path) -> Any:
 
 def _ghsa_id(vuln: dict[str, Any]) -> str | None:
     for candidate in [vuln.get("id", ""), *vuln.get("aliases", [])]:
-        if candidate.startswith("GHSA-"):
-            return candidate
+        if str(candidate).startswith("GHSA-"):
+            return str(candidate)
     return None
 
 
 def fetch_severity(vuln_id: str, timeout: float = 10.0) -> Severity | None:
     """Severity from the GitHub advisory record in OSV, or None if unavailable."""
     try:
-        with urllib.request.urlopen(OSV_VULN_URL.format(id=vuln_id), timeout=timeout) as resp:
+        url = OSV_VULN_URL.format(id=vuln_id)  # constant https:// URL
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
             data = json.load(resp)
     except (urllib.error.URLError, TimeoutError, ValueError, OSError):
         return None
@@ -161,7 +151,10 @@ def run_pip_audit(
             "--progress-spinner", "off", "-f", "json",
         ]  # fmt: skip
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            # pip-audit exits 1 when it finds vulnerabilities, so the code is not an error.
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, check=False
+            )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return DependencyAudit.ERROR, f"pip-audit did not run: {exc}", []
     if "No module named pip_audit" in result.stderr:

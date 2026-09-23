@@ -123,10 +123,10 @@ def assess_models(
         raise AssessmentError(f"leakage audit failed: {exc}") from exc
 
 
-def scan_secrets(root: Path, artifacts: list[ArtifactRef]) -> tuple[int, list]:
+def scan_secrets(root: Path, artifacts: list[ArtifactRef]) -> tuple[int, list[Finding]]:
     """Secrets scan over every non-model artifact. Returns (files scanned, findings)."""
     scanner = SecretsScanner()
-    findings = []
+    findings: list[Finding] = []
     scanned = 0
     for artifact in artifacts:
         if artifact.kind is ArtifactKind.MODEL:

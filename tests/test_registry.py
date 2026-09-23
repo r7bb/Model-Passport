@@ -46,11 +46,9 @@ def test_upload_list_get_verify(client: TestClient, built: tuple) -> None:
     assert client.get("/models").json()[0]["passports"] == 1
 
     verification = client.get(f"/passports/{pid}/verify").json()
-    assert (
-        verification["ok"]
-        and verification["signature_ok"]
-        and not verification["artifacts_checked"]
-    )
+    assert verification["ok"]
+    assert verification["signature_ok"]
+    assert not verification["artifacts_checked"]
     assert client.get(f"/passports/{pid}/public-key").json()["public_key_pem"] == pem
 
 
@@ -103,7 +101,7 @@ def test_events_must_extend_the_chain(client: TestClient, built: tuple) -> None:
 
 
 def test_lineage_dag_html_jsonld(client: TestClient, project: Path, built: tuple) -> None:
-    document, pem, _ = built
+    _, pem, _ = built
     first = build_passport(project / CONFIG_FILENAME)
     second = build_passport(project / CONFIG_FILENAME, previous=first)
     for passport in (first, second):
@@ -117,7 +115,8 @@ def test_lineage_dag_html_jsonld(client: TestClient, project: Path, built: tuple
     assert len(lineage["nodes"]) == 2
     assert "digraph lineage" in client.get(f"/passports/{sid}/dag").json()["lineage"]
     html = client.get(f"/passports/{sid}/html")
-    assert html.status_code == 200 and "demo-model" in html.text
+    assert html.status_code == 200
+    assert "demo-model" in html.text
     assert "@graph" in client.get(f"/passports/{sid}/jsonld").json()
 
 

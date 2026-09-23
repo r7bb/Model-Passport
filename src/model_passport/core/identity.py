@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 CHUNK_SIZE = 1 << 20  # 1 MiB
-PASSPHRASE_ENV = "PASSPORT_KEY_PASSPHRASE"
+PASSPHRASE_ENV = "PASSPORT_KEY_PASSPHRASE"  # noqa: S105 - env var name
 
 # Domain separation prefixes (RFC 6962 style) so a leaf can never be confused with a node.
 _LEAF_PREFIX = b"\x00"
@@ -83,6 +83,10 @@ def signing_payload(passport: dict[str, Any]) -> bytes:
     return canonical_json(body)
 
 
+class KeyFormatError(ValueError):
+    """Raised when a key file holds something other than an Ed25519 key."""
+
+
 # --- Keys --------------------------------------------------------------------------------
 
 
@@ -120,14 +124,14 @@ def save_keypair(private_key: Ed25519PrivateKey, private_path: Path, public_path
 def load_private_key(path: Path) -> Ed25519PrivateKey:
     key = serialization.load_pem_private_key(path.read_bytes(), password=_passphrase())
     if not isinstance(key, Ed25519PrivateKey):
-        raise ValueError(f"{path} is not an Ed25519 private key")
+        raise KeyFormatError(f"{path} is not an Ed25519 private key")
     return key
 
 
 def load_public_key(path: Path) -> Ed25519PublicKey:
     key = serialization.load_pem_public_key(path.read_bytes())
     if not isinstance(key, Ed25519PublicKey):
-        raise ValueError(f"{path} is not an Ed25519 public key")
+        raise KeyFormatError(f"{path} is not an Ed25519 public key")
     return key
 
 

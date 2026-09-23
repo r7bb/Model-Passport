@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -57,9 +58,12 @@ class RunRecord(BaseModel):
 
 
 def _git(root: Path, *args: str) -> str | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, check=True, timeout=30
+            [git, *args], cwd=root, capture_output=True, text=True, check=True, timeout=30
         )
     except (OSError, subprocess.SubprocessError):
         return None

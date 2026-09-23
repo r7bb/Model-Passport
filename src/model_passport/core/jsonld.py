@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from model_passport.core.schema import ArtifactKind, Passport
+from model_passport.core.schema import ArtifactKind, ArtifactRef, Passport
 
 CONTEXT = {
     "prov": "http://www.w3.org/ns/prov#",
@@ -41,27 +41,44 @@ def _artifact_id(sha256: str) -> str:
 
 def to_jsonld(passport: Passport) -> dict[str, Any]:
     pid = f"urn:uuid:{passport.identity.passport_id}"
-    tool = {"@id": "mp:model-passport", "@type": ["prov:Agent", "prov:SoftwareAgent"]}
-    owner = passport.declared.owner
-    owner_node = (
-        {"@id": f"{pid}#owner", "@type": ["prov:Agent"], "dcterms:title": owner} if owner else None
-    )
-    agents = [tool] + ([owner_node] if owner_node else [])
+    agents = _agent_nodes(passport, pid)
     agent_ids = [a["@id"] for a in agents]
+    activities, generated_by = _stage_nodes(passport, pid, agent_ids)
+    artifacts = [_artifact_node(a, generated_by.get(a.path)) for a in passport.artifacts]
+    graph = [*agents, *artifacts, *activities, _passport_node(passport, pid, agent_ids)]
+    return {"@context": CONTEXT, "@graph": graph}
 
-    graph: list[dict[str, Any]] = list(agents)
-    by_path = {a.path: a for a in passport.artifacts}
-    for artifact in passport.artifacts:
-        graph.append(
-            {
-                "@id": _artifact_id(artifact.sha256),
-                "@type": _KIND_TYPES[artifact.kind],
-                "dcterms:identifier": artifact.path,
-                "mp:sha256": artifact.sha256,
-                "dcat:byteSize": artifact.size_bytes,
-            }
-        )
 
+def _agent_nodes(passport: Passport, pid: str) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = [
+        {"@id": "mp:model-passport", "@type": ["prov:Agent", "prov:SoftwareAgent"]}
+    ]
+    if passport.declared.owner:
+        nodes.append(
+            {"@id": f"{pid}#owner", "@type": ["prov:Agent"],
+             "dcterms:title": passport.declared.owner}
+        )  # fmt: skip
+    return nodes
+
+
+def _artifact_node(artifact: ArtifactRef, generated_by: str | None) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "@id": _artifact_id(artifact.sha256),
+        "@type": _KIND_TYPES[artifact.kind],
+        "dcterms:identifier": artifact.path,
+        "mp:sha256": artifact.sha256,
+        "dcat:byteSize": artifact.size_bytes,
+    }
+    if generated_by:
+        node["wasGeneratedBy"] = generated_by
+    return node
+
+
+def _stage_nodes(
+    passport: Passport, pid: str, agent_ids: list[str]
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """PROV activities for each stage, plus output path -> generating activity."""
+    activities: list[dict[str, Any]] = []
     generated_by: dict[str, str] = {}
     for index, stage in enumerate(passport.pipeline):
         activity_id = f"{pid}#stage-{index}-{stage.name}"
@@ -79,17 +96,13 @@ def to_jsonld(passport: Passport) -> dict[str, Any]:
             activity["startedAtTime"] = stage.started_at.isoformat()
         if stage.ended_at:
             activity["endedAtTime"] = stage.ended_at.isoformat()
-        graph.append(activity)
-        for output in stage.outputs:
-            generated_by[output.path] = activity_id
+        activities.append(activity)
+        generated_by.update(dict.fromkeys((o.path for o in stage.outputs), activity_id))
+    return activities, generated_by
 
-    for node in graph:
-        path = node.get("dcterms:identifier")
-        if path in generated_by and path in by_path:
-            node["wasGeneratedBy"] = generated_by[path]
 
-    model = passport.model
-    passport_node: dict[str, Any] = {
+def _passport_node(passport: Passport, pid: str, agent_ids: list[str]) -> dict[str, Any]:
+    node: dict[str, Any] = {
         "@id": pid,
         "@type": ["prov:Entity", "mp:Passport"],
         "dcterms:title": f"{passport.identity.model_name} {passport.identity.version}",
@@ -100,17 +113,18 @@ def to_jsonld(passport: Passport) -> dict[str, Any]:
         "wasDerivedFrom": [_artifact_id(a.sha256) for a in passport.artifacts]
         + [f"urn:uuid:{link}" for link in passport.lineage_links],
     }
-    if model is not None:
-        passport_node["mp:model"] = _artifact_id(model.artifact_sha256)
-        passport_node["mls:implements"] = model.algorithm
+    if passport.revision is not None:
+        node["prov:wasRevisionOf"] = {"@id": f"urn:uuid:{passport.revision.previous_passport_id}"}
+    if passport.model is not None:
+        node["mp:model"] = _artifact_id(passport.model.artifact_sha256)
+        node["mls:implements"] = passport.model.algorithm
     if passport.policy is not None:
-        passport_node["mp:verdict"] = passport.policy.verdict.value
+        node["mp:verdict"] = passport.policy.verdict.value
     if passport.metrics:
-        passport_node["mls:hasOutput"] = [
+        node["mls:hasOutput"] = [
             {"@type": "mls:ModelEvaluation", "mp:split": split, "mls:specifiedBy": name,
              "mls:hasValue": value}
             for split, values in passport.metrics.items()
             for name, value in values.items()
         ]  # fmt: skip
-    graph.append(passport_node)
-    return {"@context": CONTEXT, "@graph": graph}
+    return node

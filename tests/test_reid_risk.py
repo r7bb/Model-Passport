@@ -49,11 +49,14 @@ def test_suggest_quasi_identifiers() -> None:
 
 def test_assess_and_scanner() -> None:
     result = assess(FRAME, "t", ["age", "zip", "gender"], "income")
-    assert result.k_anonymity == 1 and result.l_diversity == 1 and result.rows == 6
+    assert result.k_anonymity == 1
+    assert result.l_diversity == 1
+    assert result.rows == 6
 
     scanner = ReidRiskScanner(["age", "zip", "gender"])
     findings = scanner.scan(ScanTarget.from_frame(FRAME, "t"))
-    assert findings[0].category == "K_ANONYMITY" and findings[0].severity.value == "critical"
+    assert findings[0].category == "K_ANONYMITY"
+    assert findings[0].severity.value == "critical"
     assert scanner.results[0].k_anonymity == 1
 
 

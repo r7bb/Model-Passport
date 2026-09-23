@@ -96,7 +96,7 @@ class RegistrySource:
                 verdict=s.get("verdict"),
                 sequence=None,
             )
-            for s in self.client.list()
+            for s in self.client.search()
         ]
 
     def document(self, passport_id: str) -> dict[str, Any]:

@@ -12,7 +12,7 @@ from model_passport.core.config import StageConfig, TrackingConfig
 from model_passport.core.schema import PipelineStage
 
 
-class TrackingUnavailable(Exception):
+class TrackingUnavailableError(Exception):
     """Raised when a configured tracking backend cannot be used."""
 
 
@@ -39,11 +39,11 @@ class MlflowTracker:
 
     def __init__(self, config: TrackingConfig, root: Path, project_name: str) -> None:
         if not config.mlflow_uri:
-            raise TrackingUnavailable("tracking.mlflow_uri is not set")
+            raise TrackingUnavailableError("tracking.mlflow_uri is not set")
         try:
-            from mlflow.tracking import MlflowClient
+            from mlflow.tracking import MlflowClient  # noqa: PLC0415 - optional dependency
         except ImportError as exc:
-            raise TrackingUnavailable("mlflow is not installed (pip install mlflow)") from exc
+            raise TrackingUnavailableError("mlflow is not installed (pip install mlflow)") from exc
 
         self.client = MlflowClient(tracking_uri=resolve_tracking_uri(config.mlflow_uri, root))
         name = config.mlflow_experiment or project_name
@@ -71,13 +71,13 @@ class MlflowTracker:
         }
         run = self.client.create_run(self.experiment_id, tags=tags)
         run_id = run.info.run_id
-        for key, value in _flatten(record.parameters).items():
-            self.client.log_param(run_id, key, value)
+        for key, param in _flatten(record.parameters).items():
+            self.client.log_param(run_id, key, param)
         for split, values in metrics.items():
-            for name, value in values.items():
-                self.client.log_metric(run_id, f"{split}_{name}", value)
+            for name, metric in values.items():
+                self.client.log_metric(run_id, f"{split}_{name}", metric)
                 if self.parent_run_id:
-                    self.client.log_metric(self.parent_run_id, f"{split}_{name}", value)
+                    self.client.log_metric(self.parent_run_id, f"{split}_{name}", metric)
         self.client.set_terminated(run_id)
 
     def finish(self, status: str = "FINISHED") -> None:
@@ -90,11 +90,11 @@ def log_passport(
 ) -> None:
     """Attach a built passport to the pipeline's MLflow run."""
     if not config.mlflow_uri:
-        raise TrackingUnavailable("tracking.mlflow_uri is not set")
+        raise TrackingUnavailableError("tracking.mlflow_uri is not set")
     try:
-        from mlflow.tracking import MlflowClient
+        from mlflow.tracking import MlflowClient  # noqa: PLC0415 - optional dependency
     except ImportError as exc:
-        raise TrackingUnavailable("mlflow is not installed (pip install mlflow)") from exc
+        raise TrackingUnavailableError("mlflow is not installed (pip install mlflow)") from exc
     client = MlflowClient(tracking_uri=resolve_tracking_uri(config.mlflow_uri, root))
     for key, value in tags.items():
         client.set_tag(run_id, key, value)
@@ -105,16 +105,17 @@ def dvc_add(root: Path, paths: list[Path]) -> None:
     """Track stage outputs with DVC (``dvc add``)."""
     if not paths:
         return
-    if shutil.which("dvc") is None:
-        raise TrackingUnavailable("dvc is not installed (pip install dvc)")
+    dvc = shutil.which("dvc")
+    if dvc is None:
+        raise TrackingUnavailableError("dvc is not installed (pip install dvc)")
     if not (root / ".dvc").is_dir():
-        raise TrackingUnavailable("not a DVC repository (run `dvc init`)")
+        raise TrackingUnavailableError("not a DVC repository (run `dvc init`)")
     result = subprocess.run(
-        ["dvc", "add", *[str(p) for p in paths]],
+        [dvc, "add", *[str(p) for p in paths]],
         cwd=root,
         capture_output=True,
         text=True,
         check=False,
     )
     if result.returncode != 0:
-        raise TrackingUnavailable(f"dvc add failed: {result.stderr.strip()}")
+        raise TrackingUnavailableError(f"dvc add failed: {result.stderr.strip()}")

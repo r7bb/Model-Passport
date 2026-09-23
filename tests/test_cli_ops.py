@@ -34,7 +34,8 @@ def test_scan_secrets_directory(tmp_path: Path) -> None:
     assert runner.invoke(app, ["scan", "secrets", str(tmp_path)]).exit_code == 0
     (tmp_path / "leak.env").write_text("-----BEGIN RSA PRIVATE KEY-----\n")
     result = runner.invoke(app, ["scan", "secrets", str(tmp_path)])
-    assert result.exit_code == 1 and "PRIVATE_KEY" in result.output
+    assert result.exit_code == 1
+    assert "PRIVATE_KEY" in result.output
 
 
 def test_audit_model_cli(sk_project: Path) -> None:
@@ -73,4 +74,5 @@ def test_push_success_and_failure(project: Path, monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(ops.RegistryClient, "upload", refuse)
     result = runner.invoke(app, ["push", "--registry", "http://registry.test"])
-    assert result.exit_code == 1 and "422" in result.output
+    assert result.exit_code == 1
+    assert "422" in result.output

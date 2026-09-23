@@ -53,6 +53,8 @@ dev = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "types-PyYAML",
+    "pandas-stubs",
+    "scipy-stubs",
 ]
 
 [project.scripts]
@@ -77,8 +79,40 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = [
+    "E", "W", "F", "I", "UP", "B", "SIM", "C4", "C90", "N", "RET", "ARG", "PTH", "PIE",
+    "PT", "RUF", "PERF", "PL", "S", "BLE", "TRY", "ERA", "T20", "ISC", "Q",
+]
+ignore = [
+    "PLR2004",  # magic values in comparisons: thresholds are named where they matter
+    "TRY003",   # long exception messages are the user-facing error text
+    "S101",     # assert is used in tests
+    "S603",     # subprocess without shell: commands are built from lists, never strings
+    "RUF001",   # ambiguous unicode in strings: intentional "·", "→", "±" in output
+    "RUF002",
+    "ISC001",   # conflicts with the formatter
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
-# TODO(quality pass): break up long Streamlit layout lines, then remove this.
-"dashboard/app.py" = ["E501"]
+"tests/**" = ["S", "PLR0913", "ARG", "PLC0415", "N806"]  # N806: sklearn-style X
+"demo/**" = ["T20", "S301", "N803", "N806"]  # scripts print; own pickle; sklearn-style X
+"scripts/**" = ["T20"]
+# Typer commands declare one parameter per CLI option; the count is the interface, not a smell.
+"src/model_passport/cli/**" = ["PLR0913", "PLR0917"]
+"dashboard/app.py" = ["E501"]             # TODO(quality pass): break up long layout lines
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/model_passport"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["picklescan.*", "joblib.*", "sklearn.*", "presidio_analyzer.*", "mlflow.*"]
+ignore_missing_imports = true

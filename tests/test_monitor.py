@@ -10,7 +10,12 @@ from conftest import make_frame
 from model_passport.cli import app
 from model_passport.core import identity
 from model_passport.core.verifier import verify_passport
-from model_passport.monitoring.monitor import DRIFT_EVENT, MonitorError, monitor_batch
+from model_passport.monitoring.monitor import (
+    DRIFT_EVENT,
+    MonitorError,
+    MonitorSettings,
+    monitor_batch,
+)
 
 runner = CliRunner()
 
@@ -30,7 +35,8 @@ def test_stable_batch_needs_no_retraining(sk_project: Path) -> None:
     result = monitor_batch(sk_project / "passport.json", batch, sk_project, _key(sk_project))
     assert not result.drift.drift_detected
     assert not result.retrain_recommended
-    assert result.performance and not result.performance["degraded"]
+    assert result.performance
+    assert not result.performance["degraded"]
     assert {f.feature for f in result.drift.features} == {"hours", "group"}  # label excluded
 
 
@@ -42,7 +48,8 @@ def test_drifted_batch_recommends_retraining_and_appends_signed_event(sk_project
     assert result.retrain_recommended
 
     events = json.loads(passport.read_text())["events"]
-    assert len(events) == 1 and events[0]["event_type"] == DRIFT_EVENT
+    assert len(events) == 1
+    assert events[0]["event_type"] == DRIFT_EVENT
     payload = events[0]["payload"]
     assert payload["batch_sha256"] == identity.sha256_file(batch)
     assert payload["reference"] == "train"
@@ -87,7 +94,11 @@ def test_unknown_reference_dataset(sk_project: Path) -> None:
     batch = _batch(sk_project, "b", n=100, seed=16)
     with pytest.raises(MonitorError, match="no reference dataset"):
         monitor_batch(
-            sk_project / "passport.json", batch, sk_project, _key(sk_project), reference="nope"
+            sk_project / "passport.json",
+            batch,
+            sk_project,
+            _key(sk_project),
+            MonitorSettings(reference="nope"),
         )
 
 
@@ -102,7 +113,8 @@ def test_cli_exit_codes(sk_project: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     result = runner.invoke(app, ["monitor", "drift", "drifted.csv"])
     assert result.exit_code == 1
-    assert "[DRIFT] hours" in result.output and "retraining recommended" in result.output
+    assert "[DRIFT] hours" in result.output
+    assert "retraining recommended" in result.output
 
     assert runner.invoke(app, ["verify"]).exit_code == 0
     assert runner.invoke(app, ["monitor", "drift", "missing.csv"]).exit_code == 2

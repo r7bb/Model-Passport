@@ -24,6 +24,7 @@ from model_passport.core import identity
 from model_passport.core.schema import (
     Passport,
     PolicyResult,
+    ReidentificationResult,
     RuleResult,
     Severity,
     Verdict,
@@ -87,39 +88,33 @@ def _pii_columns(p: Passport) -> int | None:
     )
 
 
+def _reid_results(p: Passport) -> list[ReidentificationResult]:
+    return p.privacy_report.reidentification if p.privacy_report else []
+
+
 def _min_k(p: Passport) -> int | None:
-    report = p.privacy_report
-    values = [r.k_anonymity for r in (report.reidentification if report else [])]
-    values = [v for v in values if v is not None]
+    values = [r.k_anonymity for r in _reid_results(p) if r.k_anonymity is not None]
     return min(values) if values else Missing
 
 
 def _max_unique(p: Passport) -> float | None:
-    report = p.privacy_report
-    results = [r for r in (report.reidentification if report else []) if r.quasi_identifiers]
+    results = [r for r in _reid_results(p) if r.quasi_identifiers]
     return max(r.unique_fraction for r in results) if results else Missing
 
 
 def _min_l(p: Passport) -> int | None:
-    report = p.privacy_report
-    values = [r.l_diversity for r in (report.reidentification if report else [])]
-    values = [v for v in values if v is not None]
+    values = [r.l_diversity for r in _reid_results(p) if r.l_diversity is not None]
     return min(values) if values else Missing
 
 
-def _mia_auc(p: Passport) -> float | None:
-    leakage = p.privacy_report.leakage if p.privacy_report else None
-    return leakage.mia_auc if leakage else Missing
+def _leakage(field: str) -> Callable[[Passport], float | None]:
+    """Evidence extractor for one LeakageResult field."""
 
+    def extract(p: Passport) -> float | None:
+        leakage = p.privacy_report.leakage if p.privacy_report else None
+        return getattr(leakage, field) if leakage else Missing
 
-def _mia_tpr(p: Passport) -> float | None:
-    leakage = p.privacy_report.leakage if p.privacy_report else None
-    return leakage.tpr_at_low_fpr if leakage else Missing
-
-
-def _gap(p: Passport) -> float | None:
-    leakage = p.privacy_report.leakage if p.privacy_report else None
-    return leakage.generalization_gap if leakage else Missing
+    return extract
 
 
 def _secrets(p: Passport) -> int | None:
@@ -161,9 +156,11 @@ RULES: dict[str, Rule] = {
     "min_k_anonymity": Rule(_min_k, "min", "k-anonymity over quasi-identifiers"),
     "unique_record_fraction_max": Rule(_max_unique, "max", "fraction of unique records"),
     "min_l_diversity": Rule(_min_l, "min", "l-diversity of the sensitive column"),
-    "mia_auc_max": Rule(_mia_auc, "max", "membership inference attack AUC"),
-    "mia_tpr_at_low_fpr_max": Rule(_mia_tpr, "max", "attack TPR at low FPR"),
-    "generalization_gap_max": Rule(_gap, "max", "train minus test metric"),
+    "mia_auc_max": Rule(_leakage("mia_auc"), "max", "membership inference attack AUC"),
+    "mia_tpr_at_low_fpr_max": Rule(_leakage("tpr_at_low_fpr"), "max", "attack TPR at low FPR"),
+    "generalization_gap_max": Rule(
+        _leakage("generalization_gap"), "max", "train minus test metric"
+    ),
     "secrets_found_max": Rule(_secrets, "max", "confirmed secrets in data and scripts"),
     "unsafe_pickle": Rule(_unsafe_pickles, "flag", "pickle files with dangerous imports"),
     "critical_cves_max": Rule(_cves(Severity.CRITICAL), "max", "critical dependency CVEs"),

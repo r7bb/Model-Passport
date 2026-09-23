@@ -57,8 +57,8 @@ def split_metrics(y: np.ndarray, proba: np.ndarray, threshold: float) -> dict[st
 def main() -> None:
     p = params(DEFAULTS)
     # The model was produced by our own train stage in this run, so loading it is safe here.
-    with open(p["model"], "rb") as fh:
-        model = pickle.load(fh)  # noqa: S301
+    with Path(p["model"]).open("rb") as fh:
+        model = pickle.load(fh)
     positive = list(model.classes_).index(p["positive"])
 
     metrics = {}

@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from model_passport.core.schema import Finding, Severity, at_least
@@ -88,51 +89,57 @@ class SecretsScanner(Scanner):
         path = target.path
         if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES or _is_binary(path):
             return []
-        hits: dict[str, dict] = {}
-
-        def record(kind: str, severity: Severity, line_no: int, value: str) -> None:
-            entry = hits.setdefault(
-                kind, {"severity": severity, "count": 0, "first_line": line_no, "examples": []}
-            )
-            entry["count"] += 1
-            if len(entry["examples"]) < self.max_examples:
-                entry["examples"].append(mask_secret(value))
-
+        hits: dict[str, _Hit] = {}
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             for line_no, line in enumerate(fh, start=1):
-                matched_spans: list[tuple[int, int]] = []
-                for pattern in PATTERNS:
-                    for match in pattern.regex.finditer(line):
-                        value = match.group(pattern.group)
-                        if shannon_entropy(value) < pattern.min_entropy:
-                            continue
-                        if pattern.literal_only and CODE_REFERENCE_RE.search(value):
-                            continue
-                        matched_spans.append(match.span())
-                        record(pattern.name, pattern.severity, line_no, value)
-                if not self.entropy:
-                    continue
-                for match in TOKEN_RE.finditer(line):
-                    start, end = match.span()
-                    if any(s <= start < e or s < end <= e for s, e in matched_spans):
-                        continue
-                    token = match.group()
-                    if shannon_entropy(token) >= ENTROPY_THRESHOLD and _mixed(token):
-                        record("HIGH_ENTROPY_STRING", Severity.MEDIUM, line_no, token)
+                for kind, severity, value in self._scan_line(line):
+                    hit = hits.setdefault(kind, _Hit(severity=severity, first_line=line_no))
+                    hit.count += 1
+                    if len(hit.examples) < self.max_examples:
+                        hit.examples.append(mask_secret(value))
+        return [hit.finding(self.name, kind, target.label) for kind, hit in hits.items()]
 
-        return [
-            Finding(
-                scanner=self.name,
-                category=kind,
-                severity=entry["severity"],
-                location=f"{target.label}:{entry['first_line']}",
-                count=entry["count"],
-                message=f"{entry['count']} possible {kind} in {target.label}",
-                masked_examples=entry["examples"],
-                details={"first_line": entry["first_line"]},
-            )
-            for kind, entry in hits.items()
-        ]
+    def _scan_line(self, line: str) -> Iterator[tuple[str, Severity, str]]:
+        """Known patterns first; entropy only for tokens no pattern already claimed."""
+        claimed: list[tuple[int, int]] = []
+        for pattern in PATTERNS:
+            for match in pattern.regex.finditer(line):
+                value = match.group(pattern.group)
+                if shannon_entropy(value) < pattern.min_entropy:
+                    continue
+                if pattern.literal_only and CODE_REFERENCE_RE.search(value):
+                    continue
+                claimed.append(match.span())
+                yield pattern.name, pattern.severity, value
+        if not self.entropy:
+            return
+        for match in TOKEN_RE.finditer(line):
+            start, end = match.span()
+            if any(s <= start < e or s < end <= e for s, e in claimed):
+                continue
+            token = match.group()
+            if shannon_entropy(token) >= ENTROPY_THRESHOLD and _mixed(token):
+                yield "HIGH_ENTROPY_STRING", Severity.MEDIUM, token
+
+
+@dataclass
+class _Hit:
+    severity: Severity
+    first_line: int
+    count: int = 0
+    examples: list[str] = field(default_factory=list)
+
+    def finding(self, scanner: str, kind: str, label: str) -> Finding:
+        return Finding(
+            scanner=scanner,
+            category=kind,
+            severity=self.severity,
+            location=f"{label}:{self.first_line}",
+            count=self.count,
+            message=f"{self.count} possible {kind} in {label}",
+            masked_examples=self.examples,
+            details={"first_line": self.first_line},
+        )
 
 
 def _mixed(token: str) -> bool:

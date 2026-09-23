@@ -28,7 +28,7 @@ class _Strict(BaseModel):
 
 
 class Verdict(StrEnum):
-    PASS = "pass"
+    PASS = "pass"  # noqa: S105 - a verdict, not a password
     WARN = "warn"
     FAIL = "fail"
 

@@ -154,10 +154,10 @@ def _find_dates(text: str) -> list[str]:
 
 
 VALIDATORS: dict[str, Callable[[str], list[str]]] = {
-    "EMAIL": lambda s: EMAIL_RE.findall(s),
-    "US_SSN": lambda s: SSN_RE.findall(s),
+    "EMAIL": EMAIL_RE.findall,
+    "US_SSN": SSN_RE.findall,
     "CREDIT_CARD": _find_cards,
-    "PHONE": lambda s: PHONE_RE.findall(s),
+    "PHONE": PHONE_RE.findall,
     "IP_ADDRESS": _find_ips,
     "DATE": _find_dates,
 }
@@ -221,56 +221,44 @@ class PiiScanner(Scanner):
     def _scan_column(self, dataset: str, column: str, series: pd.Series) -> list[Finding]:
         values = series.dropna().astype(str)
         values = values[values.str.strip() != ""]
-        non_null = len(values)
         name_entity = entity_from_column_name(column)
+        hits = self._collect_hits(values, name_entity) if len(values) else {}
+        _apply_context_rules(hits, name_entity, values)
 
+        findings = [
+            self._finding(
+                dataset, column, entity, count, count / len(values), entity == name_entity, examples
+            )
+            for entity, (count, examples) in hits.items()
+        ]
+        if name_entity and name_entity not in hits:
+            # Name-only evidence (e.g. a "name" column, which regex cannot validate).
+            findings.append(
+                self._finding(dataset, column, name_entity, len(values), None, True, [])
+            )
+        return findings
+
+    def _collect_hits(self, values: pd.Series, name_entity: str | None) -> _Hits:
+        """Rows matching each validator, with a few masked examples."""
         validators = dict(VALIDATORS)
         if name_entity == "PHONE":
             # Bare digit strings are only phone numbers when the column says so.
             validators["PHONE"] = lambda s: PHONE_RE.findall(s) or BARE_PHONE_RE.findall(s)
-
-        hits: dict[str, tuple[int, list[str]]] = {}
-        if non_null:
-            for entity, find in validators.items():
-                count, examples = 0, []
-                for value in values:
-                    matches = find(value)
-                    if matches:
-                        count += 1
-                        if len(examples) < self.max_examples:
-                            examples.append(mask_value(matches[0], entity))
-                if count:
-                    hits[entity] = (count, examples)
-            if self.use_presidio and _is_free_text(values):
-                for entity, count in _presidio_counts(values).items():
-                    if entity not in hits:
-                        hits[entity] = (count, [])
-
-        # Dates in a birth-named column are dates of birth.
-        if "DATE" in hits and name_entity == "DATE_OF_BIRTH":
-            hits["DATE_OF_BIRTH"] = hits.pop("DATE")
-        # Random digit strings pass the Luhn check 10% of the time, so a column of numeric IDs
-        # would look like sparse card numbers. Require a majority unless the name or free text
-        # context supports it.
-        if (
-            "CREDIT_CARD" in hits
-            and name_entity != "CREDIT_CARD"
-            and hits["CREDIT_CARD"][0] / non_null < CARD_MIN_HIT_RATE
-            and not _is_free_text(values)
-        ):
-            del hits["CREDIT_CARD"]
-
-        findings = []
-        for entity, (count, examples) in hits.items():
-            hit_rate = count / non_null
-            name_agrees = entity == name_entity
-            findings.append(
-                self._finding(dataset, column, entity, count, hit_rate, name_agrees, examples)
-            )
-        if name_entity and name_entity not in hits:
-            # Name-only evidence (e.g. a "name" column, which regex cannot validate).
-            findings.append(self._finding(dataset, column, name_entity, non_null, None, True, []))
-        return findings
+        hits: _Hits = {}
+        for entity, find in validators.items():
+            count, examples = 0, list[str]()
+            for value in values:
+                matches = find(value)
+                if matches:
+                    count += 1
+                    if len(examples) < self.max_examples:
+                        examples.append(mask_value(matches[0], entity))
+            if count:
+                hits[entity] = (count, examples)
+        if self.use_presidio and _is_free_text(values):
+            for entity, count in _presidio_counts(values).items():
+                hits.setdefault(entity, (count, []))
+        return hits
 
     def _finding(
         self,
@@ -308,6 +296,26 @@ class PiiScanner(Scanner):
         )
 
 
+_Hits = dict[str, tuple[int, list[str]]]
+
+
+def _apply_context_rules(hits: _Hits, name_entity: str | None, values: pd.Series) -> None:
+    """Reinterpret or drop hits using the column name and content type."""
+    # Dates in a birth-named column are dates of birth.
+    if "DATE" in hits and name_entity == "DATE_OF_BIRTH":
+        hits["DATE_OF_BIRTH"] = hits.pop("DATE")
+    # Random digit strings pass the Luhn check 10% of the time, so a column of numeric IDs
+    # would look like sparse card numbers. Require a majority unless the name or free-text
+    # context supports it.
+    if (
+        "CREDIT_CARD" in hits
+        and name_entity != "CREDIT_CARD"
+        and hits["CREDIT_CARD"][0] / len(values) < CARD_MIN_HIT_RATE
+        and not _is_free_text(values)
+    ):
+        del hits["CREDIT_CARD"]
+
+
 def _is_free_text(values: pd.Series) -> bool:
     sample = values.head(200)
     return bool(len(sample)) and float(sample.str.contains(r"\s").mean()) > 0.5
@@ -316,7 +324,7 @@ def _is_free_text(values: pd.Series) -> bool:
 def _presidio_counts(values: pd.Series) -> dict[str, int]:
     """Entity counts from Microsoft Presidio, if installed. Returns {} otherwise."""
     try:
-        from presidio_analyzer import AnalyzerEngine
+        from presidio_analyzer import AnalyzerEngine  # noqa: PLC0415 - optional dependency
     except ImportError:
         return {}
     analyzer = AnalyzerEngine()

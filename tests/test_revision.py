@@ -28,7 +28,8 @@ def test_revision_records_dataset_and_artifact_changes(project: Path) -> None:
     assert revision is not None
     assert revision.previous_passport_id == first.identity.passport_id
     assert revision.previous_merkle_root == first.identity.merkle_root
-    assert revision.sequence == 1 and revision.reason == "new rows"
+    assert revision.sequence == 1
+    assert revision.reason == "new rows"
     assert revision.changed_artifacts == ["data/train.csv"]
     status = {c.name: c.status.value for c in revision.dataset_changes}
     assert status == {"train": "changed", "test": "unchanged"}

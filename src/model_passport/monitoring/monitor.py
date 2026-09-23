@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from model_passport.auditors.artifact import UnsafeArtifactError, safe_load_pickle
 from model_passport.core import identity
@@ -27,6 +28,16 @@ DEFAULT_DEGRADATION_TOLERANCE = 0.05
 
 class MonitorError(Exception):
     """Raised when a batch cannot be checked against the passport."""
+
+
+@dataclass(frozen=True)
+class MonitorSettings:
+    """Tuning for a monitoring check; the defaults suit batches of a few hundred rows or more."""
+
+    reference: str | None = None  # dataset name; default is the training split
+    alpha: float = DEFAULT_ALPHA
+    psi_threshold: float = DEFAULT_PSI_THRESHOLD
+    degradation_tolerance: float = DEFAULT_DEGRADATION_TOLERANCE
 
 
 @dataclass
@@ -79,7 +90,7 @@ def _performance(
     labeled = batch.dropna(subset=[label])
     try:
         predictions = np.asarray(model.predict(labeled.drop(columns=[label]))).astype(str)
-    except Exception as exc:  # noqa: BLE001 - a bad batch must not crash monitoring
+    except Exception as exc:  # noqa: BLE001 - any model error must not crash monitoring
         return {"error": f"prediction failed: {exc}"}
     accuracy = float(np.mean(predictions == labeled[label].astype(str).to_numpy()))
     baseline = passport.metrics.get("test", {}).get("accuracy")
@@ -98,13 +109,12 @@ def monitor_batch(
     passport_path: Path,
     batch_path: Path,
     root: Path,
-    private_key: identity.Ed25519PrivateKey,
-    reference: str | None = None,
-    alpha: float = DEFAULT_ALPHA,
-    psi_threshold: float = DEFAULT_PSI_THRESHOLD,
-    degradation_tolerance: float = DEFAULT_DEGRADATION_TOLERANCE,
+    private_key: Ed25519PrivateKey,
+    settings: MonitorSettings | None = None,
+    *,
     write: bool = True,
 ) -> MonitorResult:
+    settings = settings or MonitorSettings()
     raw = json.loads(passport_path.read_text(encoding="utf-8"))
     passport = Passport.model_validate(raw)
     if identity.public_key_fingerprint(private_key.public_key()) != (
@@ -112,7 +122,7 @@ def monitor_batch(
     ):
         raise MonitorError("signing key does not match the key that signed this passport")
 
-    dataset = _reference_dataset(passport, reference)
+    dataset = _reference_dataset(passport, settings.reference)
     reference_path = _verified_path(root, passport, dataset.sha256, ArtifactKind.DATASET)
 
     model = passport.model
@@ -127,13 +137,18 @@ def monitor_batch(
 
     features = list(input_schema) or None
     drift = check_drift(
-        reference_frame, batch, features, exclude=labels, alpha=alpha, psi_threshold=psi_threshold
+        reference_frame,
+        batch,
+        features,
+        exclude=labels,
+        alpha=settings.alpha,
+        psi_threshold=settings.psi_threshold,
     )
     performance: dict[str, Any] | None = None
     if labels and not drift.schema.ok:
         performance = {"skipped": "batch does not match the model's input schema"}
     elif labels:
-        performance = _performance(root, passport, batch, labels[0], degradation_tolerance)
+        performance = _performance(root, passport, batch, labels[0], settings.degradation_tolerance)
     degraded = bool(performance and performance.get("degraded"))
     payload = {
         **drift.to_payload(),

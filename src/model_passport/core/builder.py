@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from model_passport.core import identity
 from model_passport.core.assess import (
@@ -24,13 +27,15 @@ from model_passport.core.schema import (
     ArtifactKind,
     ArtifactRef,
     DatasetInfo,
+    Environment,
     Identity,
     ModelInfo,
     Passport,
+    PrivacyReport,
     RunInfo,
     SecurityReport,
 )
-from model_passport.policy.engine import PolicyError, evaluate, load_policy
+from model_passport.policy.engine import Policy, PolicyError, evaluate, load_policy
 
 
 class BuildError(Exception):
@@ -110,75 +115,25 @@ def build_passport(
     """
     root = config_path.parent.resolve()
     config = config or load_config(config_path)
-    inputs = config.build
     run = _load_current_run(root, config)
 
     manifest = _Manifest(root)
     manifest.add(config_path.resolve(), ArtifactKind.CONFIG)
-    model_ref = manifest.add(inputs.model.path, ArtifactKind.MODEL)
-    datasets: list[tuple[str, DatasetInfo]] = []
-    for ds in inputs.datasets:
-        ref = manifest.add(ds.path, ArtifactKind.DATASET)
-        info = DatasetInfo(
-            name=ds.name or Path(ds.path).stem,
-            source=ds.source,
-            license=ds.license,
-            sha256=ref.sha256,
-            split_role=ds.split_role,
-        )
-        datasets.append((ref.path, info))
-    for extra in inputs.artifacts:
+    model_ref = manifest.add(config.build.model.path, ArtifactKind.MODEL)
+    datasets = _collect_datasets(manifest, config)
+    for extra in config.build.artifacts:
         manifest.add(extra.path, extra.kind)
     if run is not None:
         _add_run_artifacts(manifest, run)
-
-    policy = None
-    if config.policy is not None:
-        policy_ref = manifest.add(config.policy, ArtifactKind.CONFIG)
-        try:
-            policy, policy_sha256 = load_policy(root / policy_ref.path)
-        except PolicyError as exc:
-            raise BuildError(str(exc)) from exc
-
-    model_fields = inputs.model.model_dump(exclude={"path", "metadata"}, exclude_defaults=True)
-    if inputs.model.metadata is not None:
-        manifest.add(inputs.model.metadata, ArtifactKind.OTHER)
-        declared_meta = json.loads((root / inputs.model.metadata).read_text(encoding="utf-8"))
-        model_fields = {**declared_meta, **model_fields}
-
-    private_key_path = root / config.signing.private_key
-    if not private_key_path.is_file():
-        raise BuildError(
-            f"signing key not found: {config.signing.private_key} (run `passport init`)"
-        )
-    private_key = identity.load_private_key(private_key_path)
+    policy = _load_project_policy(root, config, manifest)
+    model_fields = _model_fields(root, config, manifest)
+    private_key = _load_signing_key(root, config)
 
     artifacts = manifest.sorted()
     environment = run.environment if run else capture_environment()
-    security_report = SecurityReport()
-    try:
-        privacy_report = assess_privacy(root, config.privacy, datasets)
-        privacy_report.leakage = assess_models(
-            root,
-            config.audit,
-            model_ref.path,
-            artifacts,
-            datasets,
-            environment,
-            security_report,
-            input_schema=model_fields.get("input_schema"),
-        )
-    except AssessmentError as exc:
-        raise BuildError(str(exc)) from exc
-    if config.privacy.scan_secrets:
-        scanned, secret_findings = scan_secrets(root, artifacts)
-        security_report.files_scanned_for_secrets = scanned
-        security_report.secret_findings = secret_findings
-
-    metrics = {split: dict(values) for split, values in (run.metrics if run else {}).items()}
-    for split, values in inputs.metrics.items():
-        metrics.setdefault(split, {}).update(values)
-
+    privacy_report, security_report = _run_checks(
+        root, config, model_ref, artifacts, datasets, environment, model_fields
+    )
     passport = Passport(
         identity=Identity(
             model_name=config.project.name,
@@ -192,32 +147,119 @@ def build_passport(
         ),
         datasets=[info for _, info in datasets],
         pipeline=run.stages if run else [],
-        run=(
-            RunInfo(
-                run_id=run.run_id,
-                started_at=run.started_at,
-                ended_at=run.ended_at,
-                overrides=run.overrides,
-                mlflow_run_id=run.mlflow_run_id,
-            )
-            if run
-            else None
-        ),
+        run=_run_info(run),
         environment=environment,
-        metrics=metrics,
+        metrics=_merge_metrics(run, config),
         privacy_report=privacy_report,
         security_report=security_report,
         declared=config.declared,
-        lineage_links=inputs.lineage_links,
+        lineage_links=config.build.lineage_links,
     )
     if previous is not None:
         passport.revision = compute_revision(previous, passport, reason)
     if policy is not None:
-        passport.policy = evaluate(policy, policy_sha256, passport)
+        passport.policy = evaluate(policy[0], policy[1], passport)
     return sign_passport(passport, private_key)
 
 
-def sign_passport(passport: Passport, private_key: identity.Ed25519PrivateKey) -> Passport:
+def _collect_datasets(manifest: _Manifest, config: ProjectConfig) -> list[tuple[str, DatasetInfo]]:
+    datasets = []
+    for ds in config.build.datasets:
+        ref = manifest.add(ds.path, ArtifactKind.DATASET)
+        info = DatasetInfo(
+            name=ds.name or Path(ds.path).stem,
+            source=ds.source,
+            license=ds.license,
+            sha256=ref.sha256,
+            split_role=ds.split_role,
+        )
+        datasets.append((ref.path, info))
+    return datasets
+
+
+def _load_project_policy(
+    root: Path, config: ProjectConfig, manifest: _Manifest
+) -> tuple[Policy, str] | None:
+    """The policy and its hash; the policy file itself becomes a signed artifact."""
+    if config.policy is None:
+        return None
+    ref = manifest.add(config.policy, ArtifactKind.CONFIG)
+    try:
+        return load_policy(root / ref.path)
+    except PolicyError as exc:
+        raise BuildError(str(exc)) from exc
+
+
+def _model_fields(root: Path, config: ProjectConfig, manifest: _Manifest) -> dict[str, Any]:
+    """Declared model fields, with values from the train stage's metadata file filling gaps."""
+    model = config.build.model
+    fields = model.model_dump(exclude={"path", "metadata"}, exclude_defaults=True)
+    if model.metadata is None:
+        return fields
+    manifest.add(model.metadata, ArtifactKind.OTHER)
+    metadata = json.loads((root / model.metadata).read_text(encoding="utf-8"))
+    return {**metadata, **fields}
+
+
+def _load_signing_key(root: Path, config: ProjectConfig) -> Ed25519PrivateKey:
+    path = root / config.signing.private_key
+    if not path.is_file():
+        raise BuildError(
+            f"signing key not found: {config.signing.private_key} (run `passport init`)"
+        )
+    return identity.load_private_key(path)
+
+
+def _run_checks(
+    root: Path,
+    config: ProjectConfig,
+    model_ref: ArtifactRef,
+    artifacts: list[ArtifactRef],
+    datasets: list[tuple[str, DatasetInfo]],
+    environment: Environment,
+    model_fields: dict[str, Any],
+) -> tuple[PrivacyReport, SecurityReport]:
+    security = SecurityReport()
+    try:
+        privacy = assess_privacy(root, config.privacy, datasets)
+        privacy.leakage = assess_models(
+            root,
+            config.audit,
+            model_ref.path,
+            artifacts,
+            datasets,
+            environment,
+            security,
+            input_schema=model_fields.get("input_schema"),
+        )
+    except AssessmentError as exc:
+        raise BuildError(str(exc)) from exc
+    if config.privacy.scan_secrets:
+        security.files_scanned_for_secrets, security.secret_findings = scan_secrets(root, artifacts)
+    return privacy, security
+
+
+def _merge_metrics(run: RunRecord | None, config: ProjectConfig) -> dict[str, dict[str, float]]:
+    """Metrics captured by the run, overridden by any declared in passport.yaml."""
+    metrics = {split: dict(values) for split, values in (run.metrics if run else {}).items()}
+    for split, values in config.build.metrics.items():
+        metrics.setdefault(split, {}).update(values)
+    return metrics
+
+
+def _run_info(run: RunRecord | None) -> RunInfo | None:
+    if run is None:
+        return None
+    return RunInfo(
+        run_id=run.run_id,
+        started_at=run.started_at,
+        ended_at=run.ended_at,
+        overrides=run.overrides,
+        mlflow_run_id=run.mlflow_run_id,
+    )
+
+
+def sign_passport(passport: Passport, private_key: Ed25519PrivateKey) -> Passport:
     payload = identity.signing_payload(passport.model_dump(mode="json"))
     signed = passport.model_copy(deep=True)
     signed.identity.signature = identity.sign(private_key, payload)

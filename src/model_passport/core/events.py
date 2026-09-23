@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
 from model_passport.core import identity
 from model_passport.core.schema import LifecycleEvent
 
@@ -34,7 +36,7 @@ def append_event(
     passport: dict[str, Any],
     event_type: str,
     payload: dict[str, Any],
-    private_key: identity.Ed25519PrivateKey,
+    private_key: Ed25519PrivateKey,
 ) -> dict[str, Any]:
     """Sign a new event, append it to ``passport["events"]`` in place, and return it."""
     event = LifecycleEvent(
@@ -45,7 +47,7 @@ def append_event(
     return event
 
 
-def verify_events(passport: dict[str, Any], public_key: identity.Ed25519PublicKey) -> list[str]:
+def verify_events(passport: dict[str, Any], public_key: Ed25519PublicKey) -> list[str]:
     """Return a list of problems with the event chain (empty when valid)."""
     errors = []
     expected_prev = anchor_hash(passport)

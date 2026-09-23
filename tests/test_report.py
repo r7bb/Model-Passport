@@ -48,7 +48,7 @@ def _with_privacy(p: Passport, k: int, auc: float, pii: bool) -> Passport:
                 k_anonymity=k,
                 unique_fraction=0.0,
             )
-        ],  # fmt: skip
+        ],
         leakage=LeakageResult(mia_auc=auc, tpr_at_low_fpr=0.0, members=5, nonmembers=5),
     )
     return p
@@ -82,7 +82,8 @@ def test_html_with_verification(project: Path, passport: Passport) -> None:
     write_passport(passport, out)
     report = verify_passport(out, project / ".passport/signing_key.pub", project)
     html = render_html(passport, report)
-    assert 'id="verification"' in html and "verified" in html
+    assert 'id="verification"' in html
+    assert "verified" in html
 
 
 def test_format_threshold() -> None:
@@ -113,7 +114,8 @@ def test_cli_report_and_export(project: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.chdir(project)
     assert runner.invoke(app, ["build", "--no-html"]).exit_code == 0
     result = runner.invoke(app, ["report", "passport.json", "--root", "."])
-    assert result.exit_code == 0 and (project / "passport.html").is_file()
+    assert result.exit_code == 0
+    assert (project / "passport.html").is_file()
     result = runner.invoke(app, ["export", "passport.json"])
     assert result.exit_code == 0
     assert "@graph" in json.loads((project / "passport.jsonld").read_text())

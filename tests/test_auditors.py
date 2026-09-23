@@ -142,7 +142,8 @@ PIP_AUDIT_OUTPUT = {
 def test_audit_dependencies_dedupes_and_maps_severity(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         req = Path(cmd[cmd.index("-r") + 1]).read_text()
-        assert "jinja2==2.10" in req and "model-passport" not in req
+        assert "jinja2==2.10" in req
+        assert "model-passport" not in req
         return subprocess.CompletedProcess(cmd, 1, json.dumps(PIP_AUDIT_OUTPUT), "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -169,4 +170,6 @@ def test_audit_dependencies_reports_errors(monkeypatch: pytest.MonkeyPatch) -> N
         lambda cmd, **_: subprocess.CompletedProcess(cmd, 2, "", "network unreachable"),
     )
     status, message, findings = audit_dependencies({"numpy": "2.0.0"})
-    assert status is DependencyAudit.ERROR and "network unreachable" in message and not findings
+    assert status is DependencyAudit.ERROR
+    assert "network unreachable" in message
+    assert not findings

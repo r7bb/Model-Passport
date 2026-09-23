@@ -16,6 +16,7 @@ from model_passport.monitoring.monitor import (
     DEFAULT_DEGRADATION_TOLERANCE,
     MonitorError,
     MonitorResult,
+    MonitorSettings,
     monitor_batch,
 )
 from model_passport.registry.client import RegistryClient, RegistryError
@@ -64,9 +65,7 @@ def monitor_drift(
     passport: Annotated[Path, typer.Option(help="Passport to check against.")] = Path(
         "passport.json"
     ),
-    root: Annotated[Path, typer.Option(help="Project root holding the reference data.")] = Path(
-        "."
-    ),
+    root: Annotated[Path, typer.Option(help="Project root holding the reference data.")] = Path(),
     reference: Annotated[
         str | None, typer.Option(help="Reference dataset name (default: train split).")
     ] = None,
@@ -88,9 +87,8 @@ def monitor_drift(
     key_path = private_key or root / SigningConfig().private_key
     try:
         key = identity.load_private_key(key_path)
-        result = monitor_batch(
-            passport, batch, root, key, reference, alpha, psi_threshold, tolerance
-        )
+        settings = MonitorSettings(reference, alpha, psi_threshold, tolerance)
+        result = monitor_batch(passport, batch, root, key, settings)
     except (OSError, ValueError, MonitorError) as exc:
         fail(str(exc))
     _print_monitor(result)
@@ -145,9 +143,9 @@ def serve(
 ) -> None:
     """Run the passport registry API."""
     try:
-        import uvicorn
+        import uvicorn  # noqa: PLC0415 - optional [registry] extra
 
-        from model_passport.registry.api import create_app
+        from model_passport.registry.api import create_app  # noqa: PLC0415
     except ImportError:
         fail("the registry needs extras: pip install 'model-passport[registry]'")
     application = create_app(db, token, str(trusted_keys) if trusted_keys else None)

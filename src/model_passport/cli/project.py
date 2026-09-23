@@ -37,7 +37,12 @@ from model_passport.core.config import (
 from model_passport.core.jsonld import to_jsonld
 from model_passport.core.revision import archive, load_previous
 from model_passport.core.schema import Passport, PipelineStage, Verdict
-from model_passport.core.tracking import MlflowTracker, TrackingUnavailable, dvc_add, log_passport
+from model_passport.core.tracking import (
+    MlflowTracker,
+    TrackingUnavailableError,
+    dvc_add,
+    log_passport,
+)
 from model_passport.core.verifier import ArtifactStatus, VerificationReport, verify_passport
 from model_passport.report.render import write_html
 
@@ -66,7 +71,7 @@ def _read_passport(path: Path) -> Passport:
 
 @app.command()
 def init(
-    directory: Annotated[Path, typer.Argument(help="Project directory.")] = Path("."),
+    directory: Annotated[Path, typer.Argument(help="Project directory.")] = Path(),
     name: Annotated[
         str | None, typer.Option(help="Model name (defaults to directory name).")
     ] = None,
@@ -105,7 +110,7 @@ def _start_tracker(cfg: ProjectConfig, root: Path) -> MlflowTracker | None:
     try:
         tracker = MlflowTracker(cfg.tracking, root, cfg.project.name)
         tracker.start(git_commit(root))
-    except TrackingUnavailable as exc:
+    except TrackingUnavailableError as exc:
         warn(f"MLflow logging disabled: {exc}")
         return None
     return tracker
@@ -131,7 +136,7 @@ def run(
         if cfg.tracking.dvc:
             try:
                 dvc_add(root, stage.outs)
-            except TrackingUnavailable as exc:
+            except TrackingUnavailableError as exc:
                 warn(f"DVC tracking skipped: {exc}")
 
     try:
@@ -157,7 +162,7 @@ def _log_to_mlflow(cfg: ProjectConfig, config: Path, passport: Passport, out: Pa
     try:
         log_passport(cfg.tracking, config.parent.resolve(), passport.run.mlflow_run_id, out, tags)
         typer.echo(f"  mlflow run:  {passport.run.mlflow_run_id}")
-    except TrackingUnavailable as exc:
+    except TrackingUnavailableError as exc:
         warn(f"passport not logged to MLflow: {exc}")
 
 
@@ -243,7 +248,7 @@ def verify(
     ] = None,
     root: Annotated[
         Path, typer.Option(help="Project root that artifact paths are relative to.")
-    ] = Path("."),
+    ] = Path(),
 ) -> None:
     """Recompute hashes, rebuild the Merkle root, and check the signature and events."""
     report = verify_passport(passport, public_key or root / SigningConfig().public_key, root)

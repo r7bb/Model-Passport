@@ -144,4 +144,5 @@ def test_load_policy_rejects_bad_files(tmp_path: Path, body: str) -> None:
 
 def test_repo_policy_loads() -> None:
     policy, sha = load_policy(Path(__file__).resolve().parents[1] / "policy.yaml")
-    assert "pii_columns_max" in policy.rules and len(sha) == 64
+    assert "pii_columns_max" in policy.rules
+    assert len(sha) == 64

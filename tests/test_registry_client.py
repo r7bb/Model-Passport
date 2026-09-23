@@ -55,14 +55,15 @@ def test_push_list_verify_and_events(
     monkeypatch.chdir(project)
     assert runner.invoke(app, ["build", "--no-html"]).exit_code == 0
     denied = runner.invoke(app, ["push", "--registry", registry_url, "--token", "wrong"])
-    assert denied.exit_code == 1 and "401" in denied.output
+    assert denied.exit_code == 1
+    assert "401" in denied.output
     result = runner.invoke(app, ["push", "--registry", registry_url, "--token", TOKEN])
     assert result.exit_code == 0, result.output
 
     client = RegistryClient(registry_url, TOKEN)
     document = json.loads((project / "passport.json").read_text())
     pid = document["identity"]["passport_id"]
-    assert [p["passport_id"] for p in client.list(model_name="demo-model")] == [pid]
+    assert [p["passport_id"] for p in client.search(model_name="demo-model")] == [pid]
     assert client.get(pid)["identity"]["merkle_root"] == document["identity"]["merkle_root"]
     assert client.verify(pid)["ok"]
     assert client.lineage(pid)["root"] == pid
@@ -78,4 +79,4 @@ def test_push_list_verify_and_events(
 def test_unreachable_registry() -> None:
     client = RegistryClient(f"http://127.0.0.1:{_free_port()}", timeout=2)
     with pytest.raises(RegistryError, match="cannot reach registry"):
-        client.list()
+        client.search()

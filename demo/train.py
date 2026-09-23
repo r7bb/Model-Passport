@@ -118,7 +118,7 @@ def main() -> None:
     model = result["model"]
 
     Path(p["model_out"]).parent.mkdir(parents=True, exist_ok=True)
-    with open(p["model_out"], "wb") as fh:
+    with Path(p["model_out"]).open("wb") as fh:
         pickle.dump(model, fh)
     info = {
         "framework": "scikit-learn",

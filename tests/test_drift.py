@@ -39,10 +39,12 @@ def test_shifted_features_are_detected_and_others_are_not() -> None:
     report = check_drift(reference, batch, exclude=["label"])
     assert set(report.drifted_features) == {"hours", "color"}
     hours = next(f for f in report.features if f.feature == "hours")
-    assert hours.kind == "numeric" and hours.rejected == 3
+    assert hours.kind == "numeric"
+    assert hours.rejected == 3
     assert set(hours.tests) == {"kolmogorov_smirnov", "mann_whitney_u", "cramer_von_mises"}
     color = next(f for f in report.features if f.feature == "color")
-    assert color.kind == "categorical" and set(color.tests) == {"chi_square"}
+    assert color.kind == "categorical"
+    assert set(color.tests) == {"chi_square"}
 
 
 def test_tiny_but_significant_shift_is_not_drift() -> None:
@@ -79,7 +81,8 @@ def test_schema_problems() -> None:
     report = check_drift(reference, batch, exclude=["label"])
     assert "hours" not in {f.feature for f in report.features}  # untestable, reported in schema
     payload = report.to_payload()
-    assert payload["schema_ok"] is False and payload["schema"]["missing_columns"] == ["income"]
+    assert payload["schema_ok"] is False
+    assert payload["schema"]["missing_columns"] == ["income"]
 
 
 def test_unseen_categories_counted() -> None:

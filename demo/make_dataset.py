@@ -71,7 +71,7 @@ def make(rows: int, seed: int, drift: float = 0.0) -> pd.DataFrame:
     income = np.where(1 / (1 + np.exp(-logit)) > 0.5, ">50K", "<=50K")
 
     today = date(2026, 1, 1)
-    df = pd.DataFrame(
+    return pd.DataFrame(
         {
             # Direct identifiers (fake, injected for the demo).
             "name": [fake.name() for _ in range(rows)],
@@ -101,7 +101,6 @@ def make(rows: int, seed: int, drift: float = 0.0) -> pd.DataFrame:
             "income": income,
         }
     )
-    return df
 
 
 def main() -> None:

@@ -143,19 +143,19 @@ class ReidRiskScanner(Scanner):
                 },
             )
         ]
-        for combo in result.risky_combinations:
-            findings.append(
-                Finding(
-                    scanner=self.name,
-                    category="UNIQUE_COMBINATION",
-                    severity=Severity.MEDIUM if combo.unique_fraction < 0.05 else Severity.HIGH,
-                    location=f"{target.label}:{'+'.join(combo.columns)}",
-                    count=round(combo.unique_fraction * result.rows),
-                    message=(
-                        f"{', '.join(combo.columns)} makes {combo.unique_fraction:.1%} "
-                        "of records unique"
-                    ),
-                    details={"unique_fraction": combo.unique_fraction},
-                )
+        findings.extend(
+            Finding(
+                scanner=self.name,
+                category="UNIQUE_COMBINATION",
+                severity=Severity.MEDIUM if combo.unique_fraction < 0.05 else Severity.HIGH,
+                location=f"{target.label}:{'+'.join(combo.columns)}",
+                count=round(combo.unique_fraction * result.rows),
+                message=(
+                    f"{', '.join(combo.columns)} makes {combo.unique_fraction:.1%} "
+                    "of records unique"
+                ),
+                details={"unique_fraction": combo.unique_fraction},
             )
+            for combo in result.risky_combinations
+        )
         return findings

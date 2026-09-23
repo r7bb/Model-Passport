@@ -60,7 +60,8 @@ def test_tampered_artifact_is_named(project: Path, relpath: str) -> None:
     assert not report.ok
     assert [(c.path, c.status) for c in report.changed] == [(relpath, ArtifactStatus.MODIFIED)]
     # The passport itself is untouched, so its internal integrity still holds.
-    assert report.signature_ok and report.merkle_ok
+    assert report.signature_ok
+    assert report.merkle_ok
 
 
 def test_missing_artifact_is_named(project: Path) -> None:
@@ -99,7 +100,8 @@ def test_rewritten_hash_and_merkle_still_fails_signature(project: Path) -> None:
     passport.write_text(json.dumps(data))
 
     report = _verify(project, passport)
-    assert not report.changed and report.merkle_ok
+    assert not report.changed
+    assert report.merkle_ok
     assert not report.signature_ok
     assert not report.ok
 
@@ -110,7 +112,8 @@ def test_merkle_root_mismatch_detected(project: Path) -> None:
     data["identity"]["merkle_root"] = "0" * 64
     passport.write_text(json.dumps(data))
     report = _verify(project, passport)
-    assert not report.merkle_ok and not report.ok
+    assert not report.merkle_ok
+    assert not report.ok
 
 
 def test_wrong_public_key_fails(project: Path, tmp_path: Path) -> None:
@@ -118,7 +121,9 @@ def test_wrong_public_key_fails(project: Path, tmp_path: Path) -> None:
     other_priv, other_pub = tmp_path / "o.pem", tmp_path / "o.pub"
     identity.save_keypair(identity.generate_keypair(), other_priv, other_pub)
     report = _verify(project, passport, key=other_pub)
-    assert not report.fingerprint_ok and not report.signature_ok and not report.ok
+    assert not report.fingerprint_ok
+    assert not report.signature_ok
+    assert not report.ok
 
 
 def test_signed_events_keep_passport_valid(project: Path) -> None:
@@ -158,7 +163,8 @@ def test_unreadable_passport_reports_error(project: Path) -> None:
     bad = project / "bad.json"
     bad.write_text("{not json")
     report = _verify(project, bad)
-    assert report.errors and not report.ok
+    assert report.errors
+    assert not report.ok
 
 
 def test_build_fails_on_missing_model(project: Path) -> None:

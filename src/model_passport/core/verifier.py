@@ -8,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import ValidationError
 
 from model_passport.core import identity
@@ -91,9 +92,7 @@ def verify_passport(passport_path: Path, public_key_path: Path, root: Path) -> V
     return report
 
 
-def verify_document(
-    raw: dict[str, Any], public_key: identity.Ed25519PublicKey
-) -> VerificationReport:
+def verify_document(raw: dict[str, Any], public_key: Ed25519PublicKey) -> VerificationReport:
     """Integrity checks that need no artifact files: schema, Merkle root, key, signature, events.
 
     Used by the registry, which stores passports but not the artifacts they describe.
