@@ -50,7 +50,7 @@ def lineage_dot(passport: Passport, names: dict[str, str] | None = None) -> str:
     """This passport, its upstream models, and the version it supersedes."""
     names = names or {}
     me = str(passport.identity.passport_id)
-    label = f"{passport.identity.model_name}\nv{passport.identity.version}"
+    label = names.get(me, f"{passport.identity.model_name}\nv{passport.identity.version}")
     lines = [
         "digraph lineage {",
         '  rankdir=LR; bgcolor="transparent";',

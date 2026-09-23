@@ -1,7 +1,9 @@
 """Model Passport dashboard.
 
-streamlit run dashboard/app.py                      # reads ./passport.json and history
-PASSPORT_REGISTRY_URL=http://localhost:8000 streamlit run dashboard/app.py
+    streamlit run dashboard/app.py                      # reads ./passport.json and history
+    PASSPORT_REGISTRY_URL=http://localhost:8000 streamlit run dashboard/app.py
+
+Deep link to a version with ``?passport=<passport_id>``.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from model_passport.core.schema import Passport
+from model_passport.core.schema import LifecycleEvent, Passport
 from model_passport.registry.client import RegistryClient, RegistryError
 from model_passport.registry.sources import Entry, LocalSource, PassportSource, RegistrySource
 from model_passport.report.dag import lineage_dot, pipeline_dot
@@ -25,6 +27,9 @@ VERDICT_STYLE = {
     "fail": ("#b91c1c", "#fee2e2"),
     None: ("#374151", "#e5e7eb"),
 }
+SOURCES = ["Local files", "Registry"]
+TABS = ["Simple view", "Policy", "Pipeline", "Lineage", "Privacy", "Security", "Monitoring",
+        "Raw JSON"]  # fmt: skip
 
 st.set_page_config(page_title="Model Passport", page_icon="🛂", layout="wide")
 
@@ -38,16 +43,23 @@ def badge(verdict: str | None, size: str = "15px") -> str:
     )
 
 
+def table(rows: list[dict[str, Any]]) -> None:
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
+def short(value: str | None, n: int = 12) -> str:
+    return f"{value[:n]}…" if value else ""
+
+
+# --- Source and selection ------------------------------------------------------------------
+
+
 def make_source() -> PassportSource | None:
     st.sidebar.title("🛂 Model Passport")
-    default = "Registry" if os.environ.get("PASSPORT_REGISTRY_URL") else "Local files"
-    kind = st.sidebar.radio(
-        "Source", ["Local files", "Registry"], index=["Local files", "Registry"].index(default)
-    )
+    registry_url = os.environ.get("PASSPORT_REGISTRY_URL")
+    kind = st.sidebar.radio("Source", SOURCES, index=1 if registry_url else 0)
     if kind == "Registry":
-        url = st.sidebar.text_input(
-            "Registry URL", os.environ.get("PASSPORT_REGISTRY_URL", "http://localhost:8000")
-        )
+        url = st.sidebar.text_input("Registry URL", registry_url or "http://localhost:8000")
         return RegistrySource(RegistryClient(url))
     root = st.sidebar.text_input("Project directory", os.environ.get("PASSPORT_PROJECT_DIR", "."))
     if not Path(root).is_dir():
@@ -57,10 +69,18 @@ def make_source() -> PassportSource | None:
 
 
 def pick(entries: list[Entry]) -> Entry | None:
+    wanted = st.query_params.get("passport")
+    linked = next((e for e in entries if e.passport_id == wanted), None)
     models = sorted({e.model_name for e in entries})
-    model = st.sidebar.selectbox("Model", models)
+    model = st.sidebar.selectbox(
+        "Model", models, index=models.index(linked.model_name) if linked else 0
+    )
     versions = [e for e in entries if e.model_name == model]
-    return st.sidebar.selectbox("Version", versions, format_func=lambda e: e.label)
+    index = versions.index(linked) if linked in versions else 0
+    return st.sidebar.selectbox("Version", versions, index=index, format_func=lambda e: e.label)
+
+
+# --- Header and tabs -----------------------------------------------------------------------
 
 
 def header(p: Passport, verification: dict[str, Any]) -> None:
@@ -70,22 +90,19 @@ def header(p: Passport, verification: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
     left.caption(f"`{p.identity.passport_id}` · built {p.identity.created_at:%Y-%m-%d %H:%M UTC}")
+    verdict = p.policy.verdict.value if p.policy else None
     right.markdown(
-        f"<div style='text-align:right;margin-top:18px'>{badge(p.policy.verdict.value if p.policy else None, '20px')}</div>",
+        f"<div style='text-align:right;margin-top:18px'>{badge(verdict, '20px')}</div>",
         unsafe_allow_html=True,
     )
 
-    leakage = p.privacy_report.leakage if p.privacy_report else None
-    ks = [
-        r.k_anonymity
-        for r in (p.privacy_report.reidentification if p.privacy_report else [])
-        if r.k_anonymity is not None
-    ]
+    privacy = p.privacy_report
+    leakage = privacy.leakage if privacy else None
+    ks = [r.k_anonymity for r in (privacy.reidentification if privacy else []) if r.k_anonymity]
+    accuracy = p.metrics.get("test", {}).get("accuracy")
     cols = st.columns(5)
     cols[0].metric("Signature", "valid" if verification.get("ok") else "INVALID")
-    cols[1].metric(
-        "Test accuracy", f"{p.metrics.get('test', {}).get('accuracy', float('nan')):.3f}"
-    )
+    cols[1].metric("Test accuracy", f"{accuracy:.3f}" if accuracy is not None else "–")
     cols[2].metric(
         "Attack AUC",
         f"{leakage.mia_auc:.3f}" if leakage else "–",
@@ -104,16 +121,12 @@ def simple_view(p: Passport) -> None:
         st.error(concern, icon="⚠️")
     for point in summary.points:
         st.success(point, icon="✅")
-    cols = st.columns(3)
-    for col, (title, items) in zip(
-        cols,
-        [
-            ("Out of scope", p.declared.out_of_scope_uses),
-            ("Known limitations", p.declared.known_limitations),
-            ("Ethical risks", p.declared.ethical_risks),
-        ],
-        strict=True,
-    ):
+    sections = [
+        ("Out of scope", p.declared.out_of_scope_uses),
+        ("Known limitations", p.declared.known_limitations),
+        ("Ethical risks", p.declared.ethical_risks),
+    ]
+    for col, (title, items) in zip(st.columns(3), sections, strict=True):
         col.markdown(f"**{title}**")
         for item in items or ["–"]:
             col.markdown(f"- {item}")
@@ -123,17 +136,13 @@ def policy_view(p: Passport) -> None:
     if p.policy is None:
         st.warning("No policy was applied.")
         return
-    rows = [
-        {
-            "rule": r.name,
-            "result": r.result.value.upper(),
-            "observed": r.observed,
-            "threshold": str(r.threshold),
-            "detail": r.message,
-        }
-        for r in p.policy.rules
-    ]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    table(
+        [
+            {"rule": r.name, "result": r.result.value.upper(), "observed": r.observed,
+             "threshold": str(r.threshold), "detail": r.message}
+            for r in p.policy.rules
+        ]
+    )  # fmt: skip
     st.caption(f"policy sha256 `{p.policy.policy_sha256}`")
 
 
@@ -142,36 +151,47 @@ def pipeline_view(p: Passport) -> None:
         st.info("No recorded pipeline (passport built from manual inputs).")
         return
     st.graphviz_chart(pipeline_dot(p), width="stretch")
-    rows = [
-        {"stage": s.name, "script": s.script_path, "git": (s.git_commit or "")[:8] + (" (dirty)" if s.git_dirty else ""),
-         "parameters": ", ".join(f"{k}={v}" for k, v in s.parameters.items()),
-         "seconds": round((s.ended_at - s.started_at).total_seconds(), 2) if s.started_at and s.ended_at else None}
-        for s in p.pipeline
-    ]  # fmt: skip
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    rows = []
+    for s in p.pipeline:
+        seconds = (
+            (s.ended_at - s.started_at).total_seconds() if s.started_at and s.ended_at else None
+        )
+        rows.append(
+            {"stage": s.name, "script": s.script_path,
+             "git": short(s.git_commit, 8) + (" (dirty)" if s.git_dirty else ""),
+             "parameters": ", ".join(f"{k}={v}" for k, v in s.parameters.items()),
+             "seconds": round(seconds, 2) if seconds is not None else None}
+        )  # fmt: skip
+    table(rows)
 
 
 def lineage_view(p: Passport, entries: list[Entry]) -> None:
-    names = {
-        e.passport_id: f"{e.model_name}\nv{e.version} {(e.verdict or '').upper()}" for e in entries
-    }
-    st.graphviz_chart(lineage_dot(p, names), width="stretch")
-    if p.revision:
-        rv = p.revision
-        st.markdown(
-            f"**Revision {rv.sequence}** · supersedes `{rv.previous_passport_id}` (v{rv.previous_version})"
-        )
-        if rv.reason:
-            st.write(rv.reason)
-        st.dataframe(
-            pd.DataFrame([c.model_dump(mode="json") for c in rv.dataset_changes]),
-            hide_index=True,
-            width="stretch",
-        )
-        if rv.metric_deltas:
-            st.dataframe(pd.DataFrame(rv.metric_deltas).T.style.format("{:+.4f}"), width="stretch")
-    else:
+    names = {e.passport_id: f"{e.model_name}\nv{e.version} {(e.verdict or '').upper()}"
+             for e in entries}  # fmt: skip
+    st.graphviz_chart(lineage_dot(p, names), width="content")
+    rv = p.revision
+    if rv is None:
         st.caption("First version of this model: nothing superseded.")
+        return
+    st.markdown(f"**Revision {rv.sequence}** · supersedes `{short(str(rv.previous_passport_id))}`")
+    if rv.reason:
+        st.write(rv.reason)
+    table(
+        [
+            {"dataset": c.name, "status": c.status.value, "rows before": c.previous_rows,
+             "rows now": c.current_rows, "previous sha256": short(c.previous_sha256),
+             "current sha256": short(c.current_sha256)}
+            for c in rv.dataset_changes
+        ]
+    )  # fmt: skip
+    deltas = [
+        {"split": split, "metric": name, "change": f"{delta:+.4f}"}
+        for split, values in rv.metric_deltas.items()
+        for name, delta in values.items()
+    ]
+    if deltas:
+        st.markdown("**Metric changes since the previous version**")
+        table(deltas)
 
 
 def privacy_view(p: Passport) -> None:
@@ -187,18 +207,21 @@ def privacy_view(p: Passport) -> None:
         cols[3].metric("Members / non-members", f"{pr.leakage.members} / {pr.leakage.nonmembers}")
     if pr.reidentification:
         st.markdown("**Reidentification risk**")
-        st.dataframe(pd.DataFrame([
-            {"dataset": r.dataset, "quasi-identifiers": ", ".join(r.quasi_identifiers), "k": r.k_anonymity, "l": r.l_diversity,
-             "unique %": round(r.unique_fraction * 100, 2), "risky combinations": "; ".join("+".join(c.columns) for c in r.risky_combinations[:4])}
-            for r in pr.reidentification
-        ]), hide_index=True, width="stretch")  # fmt: skip
+        table(
+            [
+                {"dataset": r.dataset, "quasi-identifiers": ", ".join(r.quasi_identifiers),
+                 "k": r.k_anonymity, "l": r.l_diversity,
+                 "unique %": round(r.unique_fraction * 100, 2),
+                 "risky combinations": "; ".join("+".join(c.columns)
+                                                 for c in r.risky_combinations[:4])}
+                for r in pr.reidentification
+            ]
+        )  # fmt: skip
     st.markdown(f"**Data findings** (scanned: {', '.join(pr.datasets_scanned) or 'none'})")
     findings = [f.model_dump(mode="json") for f in pr.data_findings if f.scanner == "pii"]
     if findings:
-        frame = pd.DataFrame(findings)[
-            ["severity", "category", "location", "count", "masked_examples"]
-        ]
-        st.dataframe(frame, hide_index=True, width="stretch")
+        columns = ["severity", "category", "location", "count", "masked_examples"]
+        st.dataframe(pd.DataFrame(findings)[columns], hide_index=True, width="stretch")
     else:
         st.success("No PII detected.")
 
@@ -214,17 +237,25 @@ def security_view(p: Passport) -> None:
     cols[2].metric(
         f"Dependency CVEs ({sr.dependency_audit.value})", len(sr.dependency_vulnerabilities)
     )
-    findings = [
-        f.model_dump(mode="json")
-        for f in sr.secret_findings + sr.artifact_findings + sr.dependency_vulnerabilities
-    ]
+    findings = sr.secret_findings + sr.artifact_findings + sr.dependency_vulnerabilities
     if findings:
-        st.dataframe(
-            pd.DataFrame(findings)[["severity", "scanner", "category", "location", "message"]],
-            hide_index=True,
-            width="stretch",
-        )
+        columns = ["severity", "scanner", "category", "location", "message"]
+        frame = pd.DataFrame([f.model_dump(mode="json") for f in findings])[columns]
+        st.dataframe(frame, hide_index=True, width="stretch")
     st.caption(sr.dependency_audit_message)
+
+
+def _drift_row(e: LifecycleEvent) -> dict[str, Any]:
+    payload = e.payload
+    return {
+        "time": e.timestamp,
+        "batch": payload.get("batch"),
+        "rows": payload.get("rows"),
+        "drift": payload.get("drift_detected"),
+        "drifted features": ", ".join(payload.get("drifted_features", [])),
+        "live accuracy": (payload.get("performance") or {}).get("accuracy"),
+        "retrain": payload.get("retrain_recommended"),
+    }
 
 
 def monitoring_view(p: Passport) -> None:
@@ -232,26 +263,23 @@ def monitoring_view(p: Passport) -> None:
     if not drift:
         st.info("No drift checks yet. Run `passport monitor drift <batch.csv>`.")
         return
-    history = pd.DataFrame(
-        [{"time": e.timestamp, "batch": e.payload.get("batch"), "rows": e.payload.get("rows"),
-          "drift": e.payload.get("drift_detected"), "drifted features": ", ".join(e.payload.get("drifted_features", [])),
-          "live accuracy": (e.payload.get("performance") or {}).get("accuracy"),
-          "retrain": e.payload.get("retrain_recommended")} for e in drift]
-    )  # fmt: skip
-    st.dataframe(history, hide_index=True, width="stretch")
-    psi = pd.DataFrame(
-        [
-            {
-                "time": e.timestamp,
-                **{name: f["psi"] for name, f in e.payload.get("features", {}).items()},
-            }
-            for e in drift
-        ]
-    ).set_index("time")
-    st.markdown("**Population stability index per feature** (≥ 0.1 moderate, ≥ 0.25 major shift)")
-    st.line_chart(psi)
+    table([_drift_row(e) for e in drift])
     latest = drift[-1].payload.get("features", {})
-    st.bar_chart(pd.Series({k: v["psi"] for k, v in latest.items()}, name="latest PSI"))
+    st.markdown(
+        f"**Population stability index, latest batch** ({drift[-1].payload.get('batch')}; "
+        "≥ 0.1 moderate, ≥ 0.25 major shift)"
+    )
+    st.bar_chart(pd.Series({k: v["psi"] for k, v in latest.items()}, name="PSI"))
+    if len(drift) > 1:
+        st.markdown("**PSI per feature over time**")
+        history = pd.DataFrame(
+            [
+                {"time": e.timestamp,
+                 **{name: f["psi"] for name, f in e.payload.get("features", {}).items()}}
+                for e in drift
+            ]
+        ).set_index("time")  # fmt: skip
+        st.line_chart(history)
 
 
 def main() -> None:
@@ -269,43 +297,29 @@ def main() -> None:
     entry = pick(entries)
     if entry is None:
         return
+    st.query_params["passport"] = entry.passport_id
     document = source.document(entry.passport_id)
     passport = Passport.model_validate(document)
     verification = source.verification(entry.passport_id)
     header(passport, verification)
 
-    tabs = st.tabs(
-        [
-            "Simple view",
-            "Policy",
-            "Pipeline",
-            "Lineage",
-            "Privacy",
-            "Security",
-            "Monitoring",
-            "Raw JSON",
-        ]
-    )
-    with tabs[0]:
-        simple_view(passport)
-    with tabs[1]:
-        policy_view(passport)
-    with tabs[2]:
-        pipeline_view(passport)
-    with tabs[3]:
-        lineage_view(passport, entries)
-    with tabs[4]:
-        privacy_view(passport)
-    with tabs[5]:
-        security_view(passport)
-    with tabs[6]:
-        monitoring_view(passport)
-    with tabs[7]:
-        st.json(document, expanded=False)
-    if not verification.get("ok"):
-        st.sidebar.error(f"Verification failed: {verification}")
-    else:
+    views = [
+        lambda: simple_view(passport),
+        lambda: policy_view(passport),
+        lambda: pipeline_view(passport),
+        lambda: lineage_view(passport, entries),
+        lambda: privacy_view(passport),
+        lambda: security_view(passport),
+        lambda: monitoring_view(passport),
+        lambda: st.json(document, expanded=False),
+    ]
+    for tab, view in zip(st.tabs(TABS), views, strict=True):
+        with tab:
+            view()
+    if verification.get("ok"):
         st.sidebar.success("Signature, Merkle root, and event chain verified")
+    else:
+        st.sidebar.error(f"Verification failed: {verification}")
 
 
 main()

@@ -104,7 +104,6 @@ max-args = 8
 "scripts/**" = ["T20"]
 # Typer commands declare one parameter per CLI option; the count is the interface, not a smell.
 "src/model_passport/cli/**" = ["PLR0913", "PLR0917"]
-"dashboard/app.py" = ["E501"]             # TODO(quality pass): break up long layout lines
 
 [tool.mypy]
 python_version = "3.11"
