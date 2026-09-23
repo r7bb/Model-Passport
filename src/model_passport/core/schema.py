@@ -99,14 +99,29 @@ class DatasetInfo(_Strict):
 
 class PipelineStage(_Strict):
     name: str
+    command: list[str] = Field(default_factory=list)
     script_path: str
     script_sha256: Sha256Hex
     git_commit: str | None = None
+    git_dirty: bool | None = Field(
+        default=None, description="True if the script had uncommitted changes when run."
+    )
     parameters: dict[str, Any] = Field(default_factory=dict)
-    inputs: list[str] = Field(default_factory=list)
-    outputs: list[str] = Field(default_factory=list)
+    inputs: list[ArtifactRef] = Field(default_factory=list)
+    outputs: list[ArtifactRef] = Field(default_factory=list)
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    exit_code: int | None = None
+
+
+class RunInfo(_Strict):
+    """The ``passport run`` invocation that produced the pipeline section."""
+
+    run_id: UUID
+    started_at: datetime
+    ended_at: datetime
+    overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    mlflow_run_id: str | None = None
 
 
 class Environment(_Strict):
@@ -180,6 +195,7 @@ class Passport(_Strict):
     model: ModelInfo | None = None
     datasets: list[DatasetInfo] = Field(default_factory=list)
     pipeline: list[PipelineStage] = Field(default_factory=list)
+    run: RunInfo | None = None
     environment: Environment | None = None
     metrics: dict[str, dict[str, float]] = Field(
         default_factory=dict, description="split -> metric name -> value"

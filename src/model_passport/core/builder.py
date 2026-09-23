@@ -6,6 +6,12 @@ import json
 from pathlib import Path
 
 from model_passport.core import identity
+from model_passport.core.capture import (
+    RunRecord,
+    capture_environment,
+    load_run_record,
+    stages_fingerprint,
+)
 from model_passport.core.config import ProjectConfig, load_config
 from model_passport.core.schema import (
     ArtifactKind,
@@ -14,6 +20,7 @@ from model_passport.core.schema import (
     Identity,
     ModelInfo,
     Passport,
+    RunInfo,
 )
 
 
@@ -42,23 +49,58 @@ def _hash_artifact(root: Path, path: Path, kind: ArtifactKind) -> ArtifactRef:
     )
 
 
+class _Manifest:
+    """Collects hashed artifacts, keyed by path; the first declared kind wins."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.items: dict[str, ArtifactRef] = {}
+
+    def add(self, path: Path | str, kind: ArtifactKind) -> ArtifactRef:
+        ref = _hash_artifact(self.root, Path(path), kind)
+        return self.items.setdefault(ref.path, ref)
+
+    def sorted(self) -> list[ArtifactRef]:
+        return sorted(self.items.values(), key=lambda a: a.path)
+
+
+def _load_current_run(root: Path, config: ProjectConfig) -> RunRecord | None:
+    if not config.stages:
+        return None
+    run = load_run_record(root)
+    if run is None:
+        raise BuildError("stages are declared but no run record exists (run `passport run`)")
+    if run.stages_sha256 != stages_fingerprint(config.stages):
+        raise BuildError("stages in passport.yaml changed since the last `passport run`")
+    return run
+
+
+def _add_run_artifacts(manifest: _Manifest, run: RunRecord) -> None:
+    """Add stage scripts, inputs, and outputs, failing if any changed since the run."""
+    for stage in run.stages:
+        recorded = [(stage.script_path, stage.script_sha256, ArtifactKind.SCRIPT)] + [
+            (ref.path, ref.sha256, ref.kind) for ref in (*stage.inputs, *stage.outputs)
+        ]
+        for path, sha256, kind in recorded:
+            if manifest.add(path, kind).sha256 != sha256:
+                raise BuildError(
+                    f"{path} changed since `passport run` (stage {stage.name!r}); rerun"
+                )
+
+
 def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Passport:
     """Build and sign a passport. Paths in the config are resolved against its directory."""
     root = config_path.parent.resolve()
     config = config or load_config(config_path)
     inputs = config.build
+    run = _load_current_run(root, config)
 
-    artifacts: dict[str, ArtifactRef] = {}
-
-    def add(path: Path, kind: ArtifactKind) -> ArtifactRef:
-        ref = _hash_artifact(root, path, kind)
-        return artifacts.setdefault(ref.path, ref)
-
-    add(config_path.resolve(), ArtifactKind.CONFIG)
-    model_ref = add(inputs.model.path, ArtifactKind.MODEL)
+    manifest = _Manifest(root)
+    manifest.add(config_path.resolve(), ArtifactKind.CONFIG)
+    model_ref = manifest.add(inputs.model.path, ArtifactKind.MODEL)
     datasets = []
     for ds in inputs.datasets:
-        ref = add(ds.path, ArtifactKind.DATASET)
+        ref = manifest.add(ds.path, ArtifactKind.DATASET)
         datasets.append(
             DatasetInfo(
                 name=ds.name or Path(ds.path).stem,
@@ -69,7 +111,9 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
             )
         )
     for extra in inputs.artifacts:
-        add(extra.path, extra.kind)
+        manifest.add(extra.path, extra.kind)
+    if run is not None:
+        _add_run_artifacts(manifest, run)
 
     private_key_path = root / config.signing.private_key
     if not private_key_path.is_file():
@@ -78,27 +122,43 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
         )
     private_key = identity.load_private_key(private_key_path)
 
-    manifest = sorted(artifacts.values(), key=lambda a: a.path)
+    metrics = {split: dict(values) for split, values in (run.metrics if run else {}).items()}
+    for split, values in inputs.metrics.items():
+        metrics.setdefault(split, {}).update(values)
+
+    model_fields = inputs.model.model_dump(exclude={"path", "metadata"}, exclude_defaults=True)
+    if inputs.model.metadata is not None:
+        manifest.add(inputs.model.metadata, ArtifactKind.OTHER)
+        declared_meta = json.loads((root / inputs.model.metadata).read_text(encoding="utf-8"))
+        model_fields = {**declared_meta, **model_fields}
+
+    artifacts = manifest.sorted()
     passport = Passport(
         identity=Identity(
             model_name=config.project.name,
             version=config.project.version,
-            merkle_root=identity.merkle_root(a.sha256 for a in manifest),
+            merkle_root=identity.merkle_root(a.sha256 for a in artifacts),
             public_key_fingerprint=identity.public_key_fingerprint(private_key.public_key()),
         ),
-        artifacts=manifest,
+        artifacts=artifacts,
         model=ModelInfo(
-            framework=inputs.model.framework,
-            algorithm=inputs.model.algorithm,
-            task_type=inputs.model.task_type,
-            hyperparameters=inputs.model.hyperparameters,
-            artifact_uri=model_ref.path,
-            artifact_sha256=model_ref.sha256,
-            input_schema=inputs.model.input_schema,
-            output_schema=inputs.model.output_schema,
+            **model_fields, artifact_uri=model_ref.path, artifact_sha256=model_ref.sha256
         ),
         datasets=datasets,
-        metrics=inputs.metrics,
+        pipeline=run.stages if run else [],
+        run=(
+            RunInfo(
+                run_id=run.run_id,
+                started_at=run.started_at,
+                ended_at=run.ended_at,
+                overrides=run.overrides,
+                mlflow_run_id=run.mlflow_run_id,
+            )
+            if run
+            else None
+        ),
+        environment=run.environment if run else capture_environment(),
+        metrics=metrics,
         declared=config.declared,
         lineage_links=inputs.lineage_links,
     )

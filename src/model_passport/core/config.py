@@ -30,6 +30,10 @@ class SigningConfig(_Strict):
 
 class ModelInput(_Strict):
     path: Path
+    metadata: Path | None = Field(
+        default=None,
+        description="JSON written by the train stage; its keys fill fields not set here.",
+    )
     framework: str | None = None
     algorithm: str | None = None
     task_type: str | None = None
@@ -61,10 +65,34 @@ class BuildInputs(_Strict):
     lineage_links: list[UUID] = Field(default_factory=list)
 
 
+class StageConfig(_Strict):
+    """One pipeline stage, similar to a DVC stage."""
+
+    name: str
+    cmd: str | list[str]
+    script: Path | None = Field(
+        default=None, description="Script to hash; defaults to the first .py file in cmd."
+    )
+    params: dict[str, Any] = Field(default_factory=dict)
+    deps: list[Path] = Field(default_factory=list)
+    outs: list[Path] = Field(default_factory=list)
+    metrics: Path | None = Field(
+        default=None, description="JSON file (split -> metric -> value) written by the stage."
+    )
+
+
+class TrackingConfig(_Strict):
+    mlflow_uri: str | None = None
+    mlflow_experiment: str | None = None
+    dvc: bool = False
+
+
 class ProjectConfig(_Strict):
     project: ProjectInfo
     signing: SigningConfig = Field(default_factory=SigningConfig)
+    tracking: TrackingConfig = Field(default_factory=TrackingConfig)
     declared: Declared = Field(default_factory=Declared)
+    stages: list[StageConfig] = Field(default_factory=list)
     build: BuildInputs
 
 
@@ -84,6 +112,19 @@ project:
 signing:
   private_key: .passport/signing_key.pem   # never commit this file
   public_key: .passport/signing_key.pub
+
+tracking:
+  mlflow_uri: null        # e.g. http://localhost:5000 (docker compose) or ./mlruns
+  mlflow_experiment: null
+  dvc: false              # run `dvc add` on stage outputs
+
+stages: []
+  # - name: train
+  #   cmd: python train.py
+  #   params: {{max_depth: 5}}      # passed to the script as JSON in $PASSPORT_PARAMS
+  #   deps: [data/train.csv]
+  #   outs: [models/model.pkl]
+  #   metrics: null                # optional JSON file: {{split: {{metric: value}}}}
 
 declared:
   intended_use: null
