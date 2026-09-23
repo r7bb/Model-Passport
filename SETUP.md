@@ -6,13 +6,13 @@ This guide takes you from nothing installed to a signed model passport, step by 
 
 1. [Install](#1-install)
 2. [Run the demo](#2-run-the-demo)
-3. [Use it on your own project](#3-use-it-on-your-own-project)
+3. [Use your own data](#3-use-your-own-data)
 4. [Check new data](#4-check-new-data)
 5. [Dashboard and registry](#5-dashboard-and-registry)
 6. [Run everything with Docker](#6-run-everything-with-docker)
 7. [Block unsafe models in CI](#7-block-unsafe-models-in-ci)
 8. [Command reference](#8-command-reference)
-9. [How verification works](#9-how-verification-works)
+9. [How it works](#9-how-it-works)
 10. [Contributing](#10-contributing)
 11. [Troubleshooting](#11-troubleshooting)
 
@@ -131,67 +131,74 @@ passport run && passport build   # rebuild to get back to a clean state
 
 ---
 
-## 3. Use it on your own project
+## 3. Use your own data
 
-### Create the config
+### The quick way: a data file and a label
 
-In your project folder:
+Put your data file (CSV, TSV, Parquet, or JSONL) in a new folder and name the column to predict:
 
 ```bash
-passport init --name my-model
+mkdir my-model && cd my-model && git init
+cp ~/Downloads/customers.csv .
+passport init --data customers.csv --label churn
 ```
 
-This creates `passport.yaml` (describes your pipeline) and a signing key in `.passport/`. Copy [policy.yaml](policy.yaml) from this repository to set pass and fail limits.
+`init` checks the file and shows what it found before changing anything:
 
-### Describe your pipeline
+```
+customers.csv: 2,000 rows, 11 columns; `churn` is binary-classification
+  identifiers to drop: name, email
+  quasi-identifiers:   age, zip
+  unused columns:      customer_id (row identifier)
+```
 
-Edit `passport.yaml`. Each **stage** is a command you already run, plus the files it reads and writes:
+It writes `passport.yaml`, three stage scripts in `stages/`, a `policy.yaml`, and a signing key. Then:
+
+```bash
+passport run        # clean, split, train, evaluate
+passport build      # check, sign, and write passport.json and passport.html
+```
+
+It works out on its own:
+
+| What | How |
+|---|---|
+| The task | Text or yes/no labels: classification. Numbers: regression (a whole-number label with at most 10 values is treated as classes). |
+| Column types | Numbers stored as text (`"1,234.50"`), dates, and codes with leading zeros (`"02103"`) are read correctly. |
+| Columns to ignore | Row IDs, constant or empty columns, and free text are left out; the train stage lists them. |
+| Bad rows | Rows with no label, exact duplicates, and classes with fewer than 3 rows are removed and counted. |
+| Personal data | Columns the PII scan flags are dropped; quasi-identifiers (age, ZIP, gender, ...) are bucketed. |
+| The model | See [How the model is chosen](#how-the-model-is-chosen). |
+
+Settings live in `passport.yaml` under each stage's `params`. The most useful ones:
+
+| Stage | Setting | Default | Meaning |
+|---|---|---|---|
+| preprocess | `quasi_identifiers` | `auto` | Columns to bucket, or `auto` to guess from column names |
+| preprocess | `identifiers` | `[]` | Extra columns to always drop |
+| preprocess | `task` | `auto` | Force `binary-classification`, `multiclass-classification`, or `regression` |
+| train | `model` | `auto` | Or force one family: `linear`, `boosting`, `forest` |
+| train | `max_gap` | `0.05` | Largest allowed train-validation gap; stops overfit models |
+| train | `search` | `full` | `quick` for a smaller, faster search |
+| evaluate | `positive` | second class | Which class counts as positive for precision and recall |
+
+Change one for a single run with `--set`, for example `passport run --set train.search=quick`.
+
+### Bring your own scripts
+
+Any stage can be your own script. Each stage is a command plus the files it reads and writes:
 
 ```yaml
-project:
-  name: my-model
-  version: 1.0.0
-
-signing:
-  private_key: .passport/signing_key.pem   # never commit this file
-  public_key: .passport/signing_key.pub
-
 stages:
-  - name: preprocess
-    cmd: python preprocess.py
-    params: {seed: 7}                      # passed to your script; override with --set
-    deps: [data/raw.csv]                   # files it reads
-    outs: [data/train.csv, data/test.csv]  # files it writes
-
   - name: train
     cmd: python train.py
-    deps: [data/train.csv]
-    outs: [models/model.pkl]
-
-  - name: evaluate
-    cmd: python evaluate.py
-    deps: [models/model.pkl, data/test.csv]
-    outs: [models/metrics.json]
-    metrics: models/metrics.json           # scores shown in the passport
-
-declared:                                  # written by a person, shown in the report
-  intended_use: What the model is for.
-  out_of_scope_uses: [Uses it must not be put to.]
-  known_limitations: [Where it may be wrong.]
-  owner: Your team
+    params: {seed: 7}                      # passed to your script; override with --set
+    deps: [data/train.csv]                 # files it reads
+    outs: [models/model.pkl]               # files it writes
+    metrics: models/metrics.json           # optional: {split: {metric: value}}
 ```
 
-See the demo's [passport.yaml](passport.yaml) and scripts in [demo/](demo/) for a complete working example.
-
-### Run, build, verify
-
-```bash
-passport run        # runs each stage and records scripts, settings, files, and the git commit
-passport build      # runs the checks, applies policy.yaml, signs; writes passport.json and passport.html
-passport verify     # confirms nothing changed since signing
-```
-
-`passport build` exits with an error when the verdict is FAIL.
+Read the parameters in your script with `from model_passport.runtime import params`. Describe the model and data under `build:` (see the demo's [passport.yaml](passport.yaml)), and fill in `declared:` (intended use, limitations, owner), which is shown in the report.
 
 ### Adjust the policy
 
@@ -238,13 +245,15 @@ It checks three things:
 
 The result is added to the passport as a signed event. The command exits with an error when retraining is recommended, so you can run it on a schedule.
 
-The batch must be preprocessed the same way as the training data. The demo shows how in [demo/prepare_batch.py](demo/prepare_batch.py):
+A raw batch must first be prepared the same way as the training data: the same identifier columns dropped and the same buckets applied. `passport prepare` does this using the rules the passport certifies, and refuses if they changed:
 
 ```bash
 python demo/make_dataset.py --rows 1000 --seed 8 --drift 0.7 --out data/batches/week1.csv
-python demo/prepare_batch.py data/batches/week1.csv --out data/batches/week1.prepared.csv
+passport prepare data/batches/week1.csv          # writes data/batches/week1.prepared.csv
 passport monitor drift data/batches/week1.prepared.csv
 ```
+
+Numbers stored as text are compared as numbers and dates as dates; ID and free-text columns are skipped.
 
 Tuning options: `--alpha` (significance level, default 0.01), `--psi-threshold` (default 0.1), `--tolerance` (allowed accuracy drop, default 0.05).
 
@@ -331,6 +340,7 @@ Run `passport <command> --help` for every option.
 | Command | What it does |
 |---|---|
 | `passport init [--name]` | Creates `passport.yaml`, a signing key, and `.gitignore` entries |
+| `passport init --data <file> --label <column>` | The same, plus ready-made stages for that dataset |
 | `passport run [--set stage.key=value]` | Runs the stages and records what they used and produced |
 | `passport build [--reason] [--no-link] [--no-html]` | Runs all checks, applies the policy, signs, and writes the report |
 | `passport verify [passport.json]` | Checks file hashes, signature, key, and event history |
@@ -340,13 +350,43 @@ Run `passport <command> --help` for every option.
 | `passport scan secrets <paths>` | Passwords and access keys in code and config |
 | `passport audit model <model> --members --nonmembers --label` | Memorization test and model file safety |
 | `passport audit deps` | Known vulnerabilities in installed packages |
+| `passport prepare <batch>` | Prepares a raw batch exactly like the training data |
 | `passport monitor drift <batch>` | Checks new data and records the result |
 | `passport serve` | Starts the registry |
 | `passport push` | Uploads a passport to a registry |
 
 ---
 
-## 9. How verification works
+## 9. How it works
+
+### How the model is chosen
+
+The train stage tries three kinds of model, simplest first:
+
+1. **Linear:** logistic regression or ridge regression, tuned over 10 regularization strengths.
+2. **Gradient-boosted trees:** tuned over learning rate, tree size, leaf size, and L2 penalty, with early stopping.
+3. **Random forest:** tuned over leaf size and features per split.
+
+Each one is scored with stratified 5-fold cross-validation. Classification uses log loss and regression uses RMSE; both reward good probabilities, not just right answers. All cleaning, filling of missing values, scaling, and encoding happen inside each fold, so no fold learns anything from its own validation rows.
+
+Two rules pick the winner:
+
+- **No memorizing:** a candidate whose training score beats its validation score by more than `max_gap` is set aside. It would leak who was in the training data and fail the privacy gate.
+- **Simplest that's as good:** among the rest, the simplest family whose score is within one standard error of the best wins. Smaller differences are just noise.
+
+The full comparison is saved to `models/selection.json`, and the train stage prints it:
+
+```
+binary-classification: chose linear (LogisticRegression), 5-fold CV accuracy 0.8213 (train-validation gap 0.0044)
+  why: best cross-validated score with train-validation gap within 0.05
+  * linear    score -0.38641   gap 0.0044
+    boosting  score -0.4052    gap 0.0397
+    forest    score -0.44185   gap 0.0587  (overfits: set aside)
+```
+
+On the demo data the linear model reaches 82.9% test accuracy. That is almost exactly the best any model could do: the synthetic labels contain random noise, which caps accuracy at about 83%. On data with curved or interacting patterns, gradient boosting wins instead. For example, the tests include a two-moons dataset where it beats the linear model by over 3 points.
+
+### How verification works
 
 - **Fingerprints:** every file (config, policy, model, data, scripts, stage inputs and outputs) gets a SHA256 hash. Changing even one byte changes its hash.
 - **One summary hash:** the file hashes are combined into a Merkle root, so a single value covers every file.
@@ -369,7 +409,7 @@ Run `passport <command> --help` for every option.
 pip install -e ".[dev,demo,registry,dashboard]"
 pre-commit install                 # runs lint, type checks, and a secrets scan on every commit
 
-pytest                             # 150+ tests, about 90% coverage
+pytest                             # 190+ tests, about 92% coverage
 ruff check . && ruff format --check .
 mypy                               # strict mode
 ```
@@ -394,6 +434,9 @@ python scripts/terminal_shot.py --help
 | `python3 --version` shows 3.9 or 3.10 | Install Python 3.11+, then create the environment with it: `python3.11 -m venv .venv` |
 | `passport init` says "kept existing" | That's expected: it never overwrites your config or key. `--force` replaces both, but older passports then need the old public key to verify. |
 | `verify` reports a changed file you didn't mean to change | Rerun `passport run && passport build` to certify the current files |
-| `monitor drift` reports schema problems | Prepare the batch with the same preprocessing as training (see [section 4](#4-check-new-data)) |
+| `monitor drift` reports schema problems | Prepare the batch first: `passport prepare <batch>` (see [section 4](#4-check-new-data)) |
+| A stage stops with "label ... has 1 distinct value" or "only N usable rows" | The data can't train a model yet: check the label column and collect more rows |
+| The train stage says "no candidate had a gap within 0.05" | Every model overfits, usually because the data is small. Add rows, or raise `max_gap` knowing the privacy gate may warn |
+| k-anonymity shows "not evaluated: no quasi-identifiers found" | List the columns that could identify a person under `privacy.quasi_identifiers` in `passport.yaml`, or ignore the warning if there are none |
 | Docker services don't start | Check `docker compose ps` and `docker compose logs <service>`. Make sure `.env` exists and ports 5000, 8000, 8501, 9000, and 9001 are free. |
 | The registry rejects uploads with 401 | Set the same `PASSPORT_REGISTRY_TOKEN` for the server and for `passport push` |

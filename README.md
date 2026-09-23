@@ -39,6 +39,17 @@ Model Passport checks for all four and gives a clear **PASS** or **FAIL**.
 | Tampering | Has anything changed since the passport was signed? |
 | New data | When new data arrives, is it still similar enough for the model to work well? |
 
+## Works with your own data
+
+Give it a data file and name the column you want to predict. Model Passport does the rest:
+
+1. **Cleans the data:** removes blank and duplicate rows, and reads numbers, dates, and codes correctly.
+2. **Protects people:** removes names, emails, and ID numbers, and groups details like age into ranges.
+3. **Picks the best model:** tries several kinds of model and keeps the most accurate one that doesn't memorize its training data.
+4. **Checks and signs the result**, so anyone can confirm it later.
+
+It's been tested on data with messy formats, missing values, rare categories, and data that changes over time.
+
 ## See it in action
 
 **Unsafe data and a model that memorizes are caught and blocked:**
@@ -69,9 +80,14 @@ Model Passport checks for all four and gives a clear **PASS** or **FAIL**.
 
 ## Try it
 
-A built-in demo uses made-up data (no real people) to show a model failing the checks, then passing after it's fixed.
+A built-in demo uses made-up data (no real people) to show a model failing the checks, then passing after it's fixed. With your own data file, it takes two commands:
 
-Step-by-step instructions are in **[SETUP.md](SETUP.md)**: installing, running the demo, using it on your own project, and troubleshooting.
+```bash
+passport init --data customers.csv --label churn
+passport run && passport build
+```
+
+Step-by-step instructions are in **[SETUP.md](SETUP.md)**: installing, running the demo, using your own data, and troubleshooting.
 
 ## Learn more
 

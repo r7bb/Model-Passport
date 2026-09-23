@@ -1,91 +1,79 @@
-# Model Passport Roadmap
+# Model Passport roadmap
 
-Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.22358) with automated privacy scanning, leakage auditing, artifact safety checks, cryptographic identity, a CI policy gate, and monitoring hooks.
+Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.22358) with privacy scanning, leakage auditing, artifact safety checks, signed identity, a CI policy gate, monitoring, and adaptive training on any tabular data.
 
-## Decisions taken for the MVP
+## Where things stand
 
-| Open question | Decision | Rationale |
+All seven phases are done: 194 tests at 92% coverage, strict ruff and mypy, and green CI (lint, tests on Python 3.11 and 3.12, the full demo lifecycle, and the Docker stack).
+
+| Phase | What it delivers |
+|---|---|
+| 1. Identity | Passport schema, SHA256 manifest, Merkle root, Ed25519 signing; `init`, `build`, `verify` |
+| 2. Provenance | `passport run` records every stage's script, parameters, inputs, outputs, git state, and environment; optional MLflow and DVC |
+| 3. Data checks | PII detection, k-anonymity, l-diversity, unique combinations, secrets scan, and the `policy.yaml` gate |
+| 4. Model checks | Membership inference attack, train-test gap, pickle safety scan, dependency CVEs |
+| 5. Sharing | Registry API, HTML report, JSON-LD export, Streamlit dashboard, Docker Compose |
+| 6. Monitoring | Signed drift events, schema and live accuracy checks, linked and archived model versions |
+| 7. Any data | `passport init --data --label`, automatic cleaning and typing, several model families chosen by cross-validation under an overfitting limit, regression support, `passport prepare` |
+
+## Decisions
+
+| Question | Decision | Why |
 |---|---|---|
-| Tabular only or tabular plus text? | Tabular first. Free text columns are scanned with our regex validators; Presidio is an optional extra (`pip install model-passport[presidio]`). | Keeps the default install light and CI fast. Presidio needs a spaCy model download. |
-| Streamlit or React dashboard? | Streamlit | Fastest to build; the registry API stays UI-agnostic, so a React client can be added later. |
-| Which stretch goal first? | None in the MVP. Shadow model attacks are next (see Later). | The loss threshold attack already shows the overfit vs regularized contrast the demo needs. |
-| HTML report rendering | Typed Python builder (`report/html.py`) instead of Jinja2 | Type-checked and linted like the rest of the code, no template language or dependency, and escaping is still automatic. |
-| Model formats for leakage audit | scikit-learn estimators saved with pickle/joblib, loaded only after a pickle safety scan | Matches the demo; ONNX and safetensors are recognized as safe formats by the artifact scanner. |
+| Tabular or text? | Tabular first; Presidio is an optional extra for free text | Keeps the install light and CI fast |
+| Dashboard | Streamlit | Fastest to build; the API stays UI-agnostic |
+| Report rendering | Typed Python HTML builder, not Jinja2 | Type-checked, escape-by-default, one less dependency |
+| Model families | Linear, gradient boosting, random forest (scikit-learn only) | No extra dependencies, and it handles missing values and categories natively |
+| Model selection | Log loss / RMSE with k-fold CV, overfitting limit, one-standard-error rule | Proper scoring rules are less noisy than accuracy; the limit keeps the privacy gate passing |
+| Missing evidence | `warn`, not `pass` | An unrun check is not a passed check |
+| `unsafe_pickle` | `fail` | A pickle importing `os.system` or `eval` should never ship |
 
-## Phases
+The passport also adds `artifacts`, `run`, and `revision` sections beyond the v0.1 spec.
 
-### Phase 1: Core passport and identity (done)
-- Pydantic schema v0.1, streamed SHA256, domain-separated Merkle root, canonical JSON, Ed25519 signing.
-- `passport init`, `passport build`, `passport verify`, which names every changed or missing file.
+## Next up
 
-### Phase 2: Provenance capture (done)
-- `stages:` in `passport.yaml`; `passport run` executes each stage and records command, script hash, git commit and dirty state, parameters, input and output hashes, and timings.
-- Parameter overrides with `passport run --set stage.key=value`, passed to scripts through `PASSPORT_PARAMS`.
-- Environment capture: Python, OS, hardware, installed packages.
-- Optional MLflow logging (one run per stage, passport attached at build) and DVC tracking of stage outputs.
+In priority order:
 
-### Phase 3: Data scanners and policy (done)
-- Common `Scanner` interface returning `Finding` objects (counts, categories, masked examples only).
-- PII scanner: column name heuristics plus validators for email, phone, SSN, Luhn-checked credit cards, IP addresses, and dates of birth. Sampling with an optional full scan.
-- Reidentification risk: k anonymity, l diversity, unique record fraction, and the smallest column combinations that make records unique.
-- Secrets scanner: known token patterns plus Shannon entropy, over data files and pipeline scripts.
-- Policy engine driven by `policy.yaml`, with pass, warn, and fail per rule. `passport build` exits nonzero on fail.
+1. **Easy install:** publish to PyPI, a ready-made GitHub Action, and a prebuilt Docker image, so nobody needs to clone the repo.
+2. **Safer model files:** save models with skops or ONNX instead of pickle, which removes the "raw pickle" warning.
+3. **Fairness checks:** accuracy and error rates per group (for example, by gender or age range), with policy limits.
+4. **Explanations:** the features that matter most (permutation importance) shown in the report and dashboard.
+5. **Better probabilities:** calibration and a decision threshold tuned for the goal (accuracy, recall, or cost).
+6. **Time-aware splits:** when data has a date column, train on the past and test on the future, so the score reflects real use.
 
-### Phase 4: Model auditors (done)
-- Loss threshold membership inference: attack AUC and TPR at 1% FPR.
-- Generalization gap between train and test metrics.
-- Pickle opcode scan (picklescan); warns when raw pickle is used instead of safetensors or ONNX.
-- `pip-audit` of the captured environment, with CVE severity from OSV.
+## Ideas for later
 
-### Phase 5: Registry, report, dashboard (done)
-- FastAPI and SQLite registry: upload, list, get, verify, and events endpoints, with an optional bearer token for writes.
-- Static `passport.html` report rendered by a small typed Python HTML builder (escape-by-default, no template engine), and JSON-LD export using W3C PROV terms.
-- Streamlit dashboard: model picker, verdict, lineage, pipeline DAG, scan results, and a plain-language "simple view".
-- Docker Compose running MLflow, MinIO (as MLflow's artifact store), the registry, and the dashboard.
+**Model quality**
+- Optional LightGBM, XGBoost, or CatBoost families, and a stacked ensemble of the best candidates.
+- Time-budgeted search (Optuna) instead of fixed grids.
+- Nested cross-validation for an unbiased estimate of the selected model.
+- Class weights for rare outcomes; group-aware splits when one person has many rows.
+- Text columns as features (TF-IDF) instead of dropping them.
+- Prediction intervals (conformal prediction) for regression.
 
-### Phase 6: CI and monitoring (done)
-- GitHub Actions: lint, tests, and an end-to-end demo run through `passport build` and `passport verify`. CI fails if the demo data carries PII.
-- Drift checks (Kolmogorov-Smirnov, Mann-Whitney U, and Cramér-von Mises for numeric features; chi-square for categorical) appended as hash-chained, signed lifecycle events.
-- New and changing data: schema validation and live accuracy on each batch, `retrain_recommended` exit code, and `passport build` linking each rebuild to the passport it supersedes (dataset, artifact, and metric deltas; archived history in `.passport/history/`).
+**Privacy and security**
+- Shadow-model membership inference (ML Privacy Meter or IBM ART) and attribute inference audits.
+- Differential privacy training (Opacus or diffprivlib).
+- Memorization tests for text models (canaries, PII extraction prompts).
+- Key rotation, a trusted-key registry with revocation, and keyless signing with Sigstore.
+- SLSA or in-toto provenance attestations alongside the passport.
 
-## Status and next steps
+**User experience**
+- `passport doctor`: checks the setup (Python, key, config, data) and says what to fix.
+- `passport explain`: the plain-language summary in the terminal.
+- Dashboard: upload a CSV to train, compare two versions side by side, and export a model card (Markdown or PDF).
+- Progress bars and time estimates during `passport run`.
+- Slack or email alerts when drift is detected; scheduled monitoring in CI.
 
-State at end of session 2 (2026-09-23): all six phases are done. There are 151 tests at about 90% coverage. ruff runs with a strict rule set, mypy --strict is clean, and pre-commit hooks are configured. CI (lint, mypy, tests on 3.11 and 3.12, the full demo lifecycle as a policy gate, and a Docker Compose build with health checks) is green on GitHub Actions.
+**Platform**
+- Postgres backend for the registry, with pagination and single sign-on.
+- Sync with the MLflow model registry and Hugging Face model cards.
+- Airflow and Kubeflow operators.
+- Regenerate the README screenshots automatically in CI.
 
-Session 2 added:
-- Tests for the drift, monitor, registry, client, revision, report, and CLI modules. They caught three real bugs, all fixed.
-- Demo ML hardening: cross-validated model selection, no-leakage pipelines, fuller metrics, batch preparation from recorded parameters, and `demo/update_cycle.sh`.
-- The CI workflow and the Docker Compose stack. MinIO images now come from quay.io.
-- The quality pass and refactors.
-- Replacing Jinja2 with a typed HTML builder.
-- README screenshots from real runs.
-- A plain-language README for non-technical readers. Installation, usage, commands, and technical details moved to SETUP.md.
+## Developer notes
 
-Possible next steps, in rough priority order:
-1. Screenshot automation: regenerate `docs/images/` in CI (or with `make docs`) so the README never goes stale.
-2. The stretch goals under Later: shadow-model MIA via ML Privacy Meter or ART, Opacus differential privacy in the demo, and text memorization tests.
-3. Key management: key rotation, and a trusted-key registry with revocation.
-4. A Postgres backend for the registry, plus pagination.
-5. Coverage gaps: `registry/client.py` error paths, `core/tracking.py` MLflow failure paths, and `cli/project.py` edge cases.
-
-Environment notes:
-- Use `.venv` (Python 3.11 from uv, installed at `~/.local/bin`). Install with `uv pip install --python .venv/bin/python -e ".[dev,demo,registry,dashboard,mlflow,docs]"` and run `python -m playwright install chromium` for screenshots.
-- Set `MLFLOW_DISABLE_AGENT_HINT=1` to silence MLflow's startup message.
+- Use `.venv` (Python 3.11 from uv at `~/.local/bin`): `uv pip install --python .venv/bin/python -e ".[dev,demo,registry,dashboard,mlflow,docs]"`, then `python -m playwright install chromium` for screenshots.
 - Tests stub pip-audit (see `tests/conftest.py`); mark a test `@pytest.mark.network` to use the real one.
-- Docker isn't installed on the dev machine, so the compose stack is validated only in CI.
-- CI job logs need repo-admin access. On failure the docker job publishes container logs as annotations, which are readable via the public API.
-- Commits carry no AI attribution lines.
-
-Deviations from the original project spec to confirm with the team:
-- Passports carry a top-level `artifacts` manifest plus `run` and `revision` sections that the v0.1 spec did not list.
-- `unsafe_pickle` defaults to `fail` (not `warn`) for pickles importing dangerous callables. Plain raw pickle is a low-severity finding, so it doesn't block.
-- A rule with no evidence (e.g. no leakage audit) yields `missing_evidence: warn`, not a pass.
-
-## Later
-- Shadow model membership inference via ML Privacy Meter or IBM ART.
-- Text model memorization: canary exposure tests and PII extraction prompts.
-- Differential privacy training (Opacus) in the demo.
-- Key rotation, and a trusted key registry with revocation.
-- Postgres backend for the registry; React dashboard.
-- Signed model cards exported to Hugging Face and MLflow model registry tags.
-- DCAT and ML Schema alignment alongside PROV in the JSON-LD export.
+- Docker isn't installed on the dev machine, so the compose stack is checked only in CI. On failure the docker job publishes container logs as annotations, readable through the public API.
+- Set `MLFLOW_DISABLE_AGENT_HINT=1` to silence MLflow's startup message.
