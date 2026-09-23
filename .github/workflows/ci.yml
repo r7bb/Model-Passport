@@ -16,12 +16,13 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11" }
-      - run: pip install "ruff>=0.5"
+      - run: pip install -e ".[dev,registry]"
       - run: ruff check .
       - run: ruff format --check .
+      - run: mypy
 
   test:
     runs-on: ubuntu-latest
@@ -30,8 +31,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -46,8 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -58,7 +59,7 @@ jobs:
         run: bash demo/update_cycle.sh
       - name: Verify the final passport
         run: passport verify passport.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: passport
@@ -72,19 +73,35 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Create an env file for CI only
         run: |
           cp .env.example .env
           sed -i "s/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)/" .env
       - run: docker compose config --quiet
-      - run: docker compose up -d --build --wait --wait-timeout 300
-      - name: Health checks
+      - run: docker compose build
+      - run: docker compose up -d
+      - name: Wait for every service to be healthy
         run: |
-          curl -fsS http://localhost:8000/health
-          curl -fsS http://localhost:5000/health
-          curl -fsS http://localhost:8501/_stcore/health
-      - if: failure()
-        run: docker compose logs
+          check() {  # name url
+            for _ in $(seq 1 60); do
+              if curl -fsS "$2" >/dev/null 2>&1; then echo "$1 healthy"; return 0; fi
+              sleep 5
+            done
+            echo "::error title=$1 unhealthy::$1 did not answer $2 within 5 minutes"
+            return 1
+          }
+          check registry http://localhost:8000/health
+          check mlflow http://localhost:5000/health
+          check dashboard http://localhost:8501/_stcore/health
+          test "$(docker compose ps -a --format '{{.ExitCode}}' minio-init)" = "0"
+      - name: Report container state and logs as annotations
+        if: failure()
+        run: |
+          docker compose ps -a
+          for service in $(docker compose config --services); do
+            tail=$(docker compose logs --no-color --tail 15 "$service" 2>&1 | tr '\n' '|' | cut -c1-900)
+            echo "::error title=logs: $service::$tail"
+          done
       - if: always()
         run: docker compose down -v
