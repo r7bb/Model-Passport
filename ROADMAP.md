@@ -37,29 +37,43 @@ Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.223
 - Pickle opcode scan (picklescan); warns when raw pickle is used instead of safetensors or ONNX.
 - `pip-audit` of the captured environment, with CVE severity from OSV.
 
-### Phase 5: Registry, report, dashboard (built; tests and Docker Compose pending)
+### Phase 5: Registry, report, dashboard (done)
 - FastAPI and SQLite registry: upload, list, get, verify, and events endpoints, with an optional bearer token for writes.
 - Static `passport.html` report rendered by a small typed Python HTML builder (escape-by-default, no template engine), and JSON-LD export using W3C PROV terms.
 - Streamlit dashboard: model picker, verdict, lineage, pipeline DAG, scan results, and a plain-language "simple view".
 - Docker Compose running MLflow, MinIO (as MLflow's artifact store), the registry, and the dashboard.
 
-### Phase 6: CI and monitoring (monitoring built; tests and CI pending)
+### Phase 6: CI and monitoring (done)
 - GitHub Actions: lint, tests, and an end-to-end demo run through `passport build` and `passport verify`. CI fails if the demo data carries PII.
 - Drift checks (Kolmogorov-Smirnov, Mann-Whitney U, and Cramér-von Mises for numeric features; chi-square for categorical) appended as hash-chained, signed lifecycle events.
 - New and changing data: schema validation and live accuracy on each batch, `retrain_recommended` exit code, and `passport build` linking each rebuild to the passport it supersedes (dataset, artifact, and metric deltas; archived history in `.passport/history/`).
 
-## Next session: pick up here
+## Status and next steps
 
-State at end of session 1 (2026-09-22): Phases 1-4 are done and tested (110 tests passing). Phase 5 and 6 code is written and was smoke-tested end to end by hand (monitor on stable vs drifted batches, retrain and revision linking, registry upload/verify/lineage, dashboard against the registry), but it has **no unit tests yet**. Work in this order:
+State at end of session 2 (2026-09-23): all six phases are done. There are 151 tests at about 90% coverage. ruff runs with a strict rule set, mypy --strict is clean, and pre-commit hooks are configured. CI (lint, mypy, tests on 3.11 and 3.12, the full demo lifecycle as a policy gate, and a Docker Compose build with health checks) is green on GitHub Actions.
 
-1. **Tests for the untested modules:** `core/events.py` (partly covered in `test_build_verify.py`), `core/revision.py`, `core/jsonld.py`, `monitoring/drift.py` (stable vs shifted data, Bonferroni, PSI gate, schema checks), `monitoring/monitor.py` (reference hash check, key mismatch, performance degradation), `registry/api.py` via `fastapi.testclient` (upload rejects tampered passports, 409 duplicates, token auth, event chain rejection, lineage), `registry/sources.py`, `report/render.py` and `report/summary.py` (autoescaping, no raw PII), and the new CLI commands (`monitor drift`, `push`, `report`, `export`, `audit`).
-2. **Demo ML hardening** (requested): cross-validated model selection in `demo/train.py` (GridSearchCV over `C` with StratifiedKFold, CV score in `model_info.json`); more metrics in `demo/evaluate.py` (log loss, precision, recall, Brier); a `demo/prepare_batch.py` that applies the same preprocessing to incoming batches (today this is done inline in the README flow); a `demo/update_cycle.sh` covering monitor, then append, then run, then build.
-3. **Phase 6 CI:** `.github/workflows/ci.yml` running ruff, mypy, and pytest, then the demo (`make_dataset`, `init`, `run`, `build`, `verify`). A push that adds a PII column to the demo data must fail the build.
-4. **Docker Compose** (`docker-compose.yml`, `Dockerfile`): MLflow with MinIO as the artifact store, the registry, the dashboard, and a `.env.example` (never commit `.env`). Docker is not installed on the dev machine, so validate in CI.
-5. **Quality pass** (requested: "proper checkstyle, no smelly code, good practices"): widen ruff rules (C90 complexity, N, PL, PTH, RET, ARG, ERA, S, BLE, TRY), add `mypy --strict`, add `.pre-commit-config.yaml`, remove the `dashboard/app.py` E501 ignore, and refactor what they flag (the long `build_passport` and dashboard functions first).
-6. **README images:** more screenshots via `scripts/screenshot.py` (dashboard Pipeline, Lineage, Privacy, and Monitoring tabs; the FAIL report), plus CLI output captures for build FAIL/PASS, verify tamper, and monitor drift.
+Session 2 added:
+- Tests for the drift, monitor, registry, client, revision, report, and CLI modules. They caught three real bugs, all fixed.
+- Demo ML hardening: cross-validated model selection, no-leakage pipelines, fuller metrics, batch preparation from recorded parameters, and `demo/update_cycle.sh`.
+- The CI workflow and the Docker Compose stack. MinIO images now come from quay.io.
+- The quality pass and refactors.
+- Replacing Jinja2 with a typed HTML builder.
+- README screenshots from real runs.
 
-Environment notes: use `.venv` (Python 3.11 from uv, installed at `~/.local/bin`); install with `uv pip install --python .venv/bin/python -e ".[dev,demo,registry,dashboard,mlflow,docs]"`. Set `MLFLOW_DISABLE_AGENT_HINT=1` to silence MLflow's startup message. Tests stub pip-audit (see `tests/conftest.py`); mark a test `@pytest.mark.network` to use the real one. Commits carry no AI attribution lines.
+Possible next steps, in rough priority order:
+1. Screenshot automation: regenerate `docs/images/` in CI (or with `make docs`) so the README never goes stale.
+2. The stretch goals under Later: shadow-model MIA via ML Privacy Meter or ART, Opacus differential privacy in the demo, and text memorization tests.
+3. Key management: key rotation, and a trusted-key registry with revocation.
+4. A Postgres backend for the registry, plus pagination.
+5. Coverage gaps: `registry/client.py` error paths, `core/tracking.py` MLflow failure paths, and `cli/project.py` edge cases.
+
+Environment notes:
+- Use `.venv` (Python 3.11 from uv, installed at `~/.local/bin`). Install with `uv pip install --python .venv/bin/python -e ".[dev,demo,registry,dashboard,mlflow,docs]"` and run `python -m playwright install chromium` for screenshots.
+- Set `MLFLOW_DISABLE_AGENT_HINT=1` to silence MLflow's startup message.
+- Tests stub pip-audit (see `tests/conftest.py`); mark a test `@pytest.mark.network` to use the real one.
+- Docker isn't installed on the dev machine, so the compose stack is validated only in CI.
+- CI job logs need repo-admin access. On failure the docker job publishes container logs as annotations, which are readable via the public API.
+- Commits carry no AI attribution lines.
 
 Deviations from the original project spec to confirm with the team:
 - Passports carry a top-level `artifacts` manifest plus `run` and `revision` sections that the v0.1 spec did not list.

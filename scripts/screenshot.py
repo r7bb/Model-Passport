@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--wait-for", help="CSS selector or text to wait for", default=None)
     parser.add_argument("--delay-ms", type=int, default=500)
     parser.add_argument("--clip-height", type=int, default=None)
+    parser.add_argument("--click", help="text of a tab or button to click before capturing")
     args = parser.parse_args()
 
     target = args.target
@@ -36,6 +37,8 @@ def main() -> None:
         page.goto(target, wait_until="networkidle")
         if args.wait_for:
             page.get_by_text(args.wait_for).first.wait_for(timeout=60_000)
+        if args.click:
+            page.get_by_role("tab", name=args.click).or_(page.get_by_text(args.click)).first.click()
         page.wait_for_timeout(args.delay_ms)
         clip = None
         if args.clip_height:
