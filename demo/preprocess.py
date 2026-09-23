@@ -13,6 +13,8 @@ DIRECT_IDENTIFIERS = ["name", "email", "phone", "ssn", "dob", "notes"]
 
 
 def age_bucket(age: int) -> str:
+    if age < 30:
+        return "18-29"
     if age >= 70:
         return "70+"
     low = (age // 10) * 10

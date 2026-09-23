@@ -87,6 +87,34 @@ class TrackingConfig(_Strict):
     dvc: bool = False
 
 
+class PrivacyConfig(_Strict):
+    """Data scans run by ``passport build`` over every declared dataset."""
+
+    enabled: bool = True
+    sample_size: int | None = Field(
+        default=10_000, description="Rows sampled for PII scanning; null scans everything."
+    )
+    quasi_identifiers: list[str] | None = Field(
+        default=None, description="Null suggests them from column names."
+    )
+    sensitive_column: str | None = None
+    presidio: bool = False
+    scan_secrets: bool = True
+
+
+class AuditConfig(_Strict):
+    """Model and artifact audits run by ``passport build``."""
+
+    label_column: str | None = Field(
+        default=None, description="Enables the leakage audit when set."
+    )
+    members: Path | None = Field(default=None, description="Defaults to the train dataset.")
+    nonmembers: Path | None = Field(default=None, description="Defaults to the test dataset.")
+    gap_metric: str = "accuracy"
+    scan_artifacts: bool = True
+    dependency_audit: bool = True
+
+
 class ProjectConfig(_Strict):
     project: ProjectInfo
     signing: SigningConfig = Field(default_factory=SigningConfig)
@@ -94,6 +122,9 @@ class ProjectConfig(_Strict):
     declared: Declared = Field(default_factory=Declared)
     stages: list[StageConfig] = Field(default_factory=list)
     build: BuildInputs
+    privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
+    policy: Path | None = Field(default=None, description="Policy file; null skips the gate.")
 
 
 def load_config(path: Path) -> ProjectConfig:

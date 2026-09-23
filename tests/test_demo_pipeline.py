@@ -26,11 +26,9 @@ def demo_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("demo")
     shutil.copytree(REPO / "demo", root / "demo")
     shutil.copy(REPO / "passport.yaml", root / "passport.yaml")
-    for extra in ("policy.yaml",):
-        if (REPO / extra).exists():
-            shutil.copy(REPO / extra, root / extra)
+    shutil.copy(REPO / "policy.yaml", root / "policy.yaml")
     subprocess.run(
-        [sys.executable, "demo/make_dataset.py", "--rows", "1500"],
+        [sys.executable, "demo/make_dataset.py", "--rows", "4000"],
         cwd=root,
         check=True,
         capture_output=True,
@@ -43,12 +41,35 @@ def demo_project(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
+UNSAFE = {
+    "preprocess": {"drop_identifiers": False, "generalize": False},
+    "train": {"model": "overfit"},
+}
+PRIVACY_RULES = {"pii_columns_max", "min_k_anonymity", "unique_record_fraction_max"}
+
+
 def run_demo(root: Path, overrides: dict | None = None) -> Path:
     config = load_config(root / "passport.yaml")
     save_run_record(root, run_pipeline(root, config, overrides))
     out = root / "passport.json"
     write_passport(build_passport(root / "passport.yaml", config), out)
     return out
+
+
+def _rule_results(out: Path) -> dict[str, str]:
+    import json
+
+    policy = json.loads(out.read_text())["policy"]
+    return {r["name"]: r["result"] for r in policy["rules"]}
+
+
+def test_injected_pii_fails_and_cleaned_data_passes(demo_project: Path) -> None:
+    unsafe = _rule_results(run_demo(demo_project, UNSAFE))
+    assert {unsafe[r] for r in PRIVACY_RULES} == {"fail"}
+
+    safe = _rule_results(run_demo(demo_project))
+    assert {safe[r] for r in PRIVACY_RULES} == {"pass"}
+    assert safe["secrets_found_max"] == "pass"
 
 
 def test_demo_passport_has_three_stages(demo_project: Path) -> None:

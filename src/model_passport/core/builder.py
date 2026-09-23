@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from model_passport.core import identity
+from model_passport.core.assess import AssessmentError, assess_privacy, scan_secrets
 from model_passport.core.capture import (
     RunRecord,
     capture_environment,
@@ -21,7 +22,9 @@ from model_passport.core.schema import (
     ModelInfo,
     Passport,
     RunInfo,
+    SecurityReport,
 )
+from model_passport.policy.engine import PolicyError, evaluate, load_policy
 
 
 class BuildError(Exception):
@@ -98,22 +101,39 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
     manifest = _Manifest(root)
     manifest.add(config_path.resolve(), ArtifactKind.CONFIG)
     model_ref = manifest.add(inputs.model.path, ArtifactKind.MODEL)
-    datasets = []
+    datasets: list[tuple[str, DatasetInfo]] = []
     for ds in inputs.datasets:
         ref = manifest.add(ds.path, ArtifactKind.DATASET)
-        datasets.append(
-            DatasetInfo(
-                name=ds.name or Path(ds.path).stem,
-                source=ds.source,
-                license=ds.license,
-                sha256=ref.sha256,
-                split_role=ds.split_role,
-            )
+        info = DatasetInfo(
+            name=ds.name or Path(ds.path).stem,
+            source=ds.source,
+            license=ds.license,
+            sha256=ref.sha256,
+            split_role=ds.split_role,
         )
+        datasets.append((ref.path, info))
     for extra in inputs.artifacts:
         manifest.add(extra.path, extra.kind)
     if run is not None:
         _add_run_artifacts(manifest, run)
+
+    policy = None
+    if config.policy is not None:
+        policy_ref = manifest.add(config.policy, ArtifactKind.CONFIG)
+        try:
+            policy, policy_sha256 = load_policy(root / policy_ref.path)
+        except PolicyError as exc:
+            raise BuildError(str(exc)) from exc
+
+    try:
+        privacy_report = assess_privacy(root, config.privacy, datasets)
+    except AssessmentError as exc:
+        raise BuildError(str(exc)) from exc
+    security_report = SecurityReport()
+    if config.privacy.scan_secrets:
+        scanned, secret_findings = scan_secrets(root, manifest.sorted())
+        security_report.files_scanned_for_secrets = scanned
+        security_report.secret_findings = secret_findings
 
     private_key_path = root / config.signing.private_key
     if not private_key_path.is_file():
@@ -144,7 +164,7 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
         model=ModelInfo(
             **model_fields, artifact_uri=model_ref.path, artifact_sha256=model_ref.sha256
         ),
-        datasets=datasets,
+        datasets=[info for _, info in datasets],
         pipeline=run.stages if run else [],
         run=(
             RunInfo(
@@ -159,9 +179,13 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
         ),
         environment=run.environment if run else capture_environment(),
         metrics=metrics,
+        privacy_report=privacy_report,
+        security_report=security_report,
         declared=config.declared,
         lineage_links=inputs.lineage_links,
     )
+    if policy is not None:
+        passport.policy = evaluate(policy, policy_sha256, passport)
     return sign_passport(passport, private_key)
 
 

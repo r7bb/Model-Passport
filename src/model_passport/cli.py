@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -26,9 +27,13 @@ from model_passport.core.config import (
     StageConfig,
     load_config,
 )
-from model_passport.core.schema import PipelineStage
+from model_passport.core.schema import Finding, PipelineStage, Severity, Verdict, at_least
 from model_passport.core.tracking import MlflowTracker, TrackingUnavailable, dvc_add, log_passport
 from model_passport.core.verifier import ArtifactStatus, verify_passport
+from model_passport.scanners.base import ScanError, ScanTarget
+from model_passport.scanners.data_pii import PiiScanner
+from model_passport.scanners.reid_risk import ReidRiskScanner
+from model_passport.scanners.secrets import SecretsScanner
 
 app = typer.Typer(help="Signed, verifiable passports for trained ML models.", no_args_is_help=True)
 
@@ -171,6 +176,94 @@ def build(
             typer.echo(f"  mlflow run:  {passport.run.mlflow_run_id}")
         except TrackingUnavailable as exc:
             _warn(f"passport not logged to MLflow: {exc}")
+
+    if passport.policy is not None:
+        typer.echo("")
+        for rule in passport.policy.rules:
+            typer.echo(f"  [{rule.result.value.upper():4}] {rule.name}: {rule.message}")
+        typer.echo(f"verdict: {passport.policy.verdict.value.upper()}")
+        if passport.policy.verdict is Verdict.FAIL:
+            raise typer.Exit(1)
+
+
+scan_app = typer.Typer(help="Run data scanners on files.", no_args_is_help=True)
+app.add_typer(scan_app, name="scan")
+
+SEVERITY_CHOICES = [s.value for s in Severity]
+
+
+def _print_findings(findings: list[Finding]) -> None:
+    if not findings:
+        typer.echo("no findings")
+    for f in findings:
+        examples = f"  e.g. {', '.join(f.masked_examples)}" if f.masked_examples else ""
+        typer.echo(f"  [{f.severity.value:8}] {f.category:22} {f.location}  n={f.count}{examples}")
+
+
+def _finish_scan(findings: list[Finding], out: Path | None, fail_on: str | None) -> None:
+    _print_findings(findings)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps([f.model_dump(mode="json") for f in findings], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        typer.echo(f"wrote {out}")
+    if fail_on and any(at_least(f.severity, Severity(fail_on)) for f in findings):
+        raise typer.Exit(1)
+
+
+OutOption = Annotated[Path | None, typer.Option(help="Write findings as JSON.")]
+FailOnOption = Annotated[
+    str | None,
+    typer.Option(help=f"Exit 1 if any finding is at least this severity: {SEVERITY_CHOICES}."),
+]
+
+
+@scan_app.command("data")
+def scan_data(
+    path: Annotated[Path, typer.Argument(help="CSV, TSV, Parquet, or JSONL file.")],
+    quasi: Annotated[
+        str | None, typer.Option(help="Comma-separated quasi-identifiers (default: suggested).")
+    ] = None,
+    sensitive: Annotated[str | None, typer.Option(help="Sensitive column for l-diversity.")] = None,
+    sample_size: Annotated[int, typer.Option(help="Rows sampled for PII scanning.")] = 10_000,
+    full: Annotated[bool, typer.Option("--full", help="Scan every row for PII.")] = False,
+    presidio: Annotated[bool, typer.Option(help="Also use Presidio on free text.")] = False,
+    out: OutOption = None,
+    fail_on: FailOnOption = None,
+) -> None:
+    """PII and reidentification risk scan of a table."""
+    target = ScanTarget(path)
+    try:
+        frame = target.frame
+    except ScanError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(f"{path}: {len(frame)} rows, {len(frame.columns)} columns")
+    pii = PiiScanner(sample_size=None if full else sample_size, use_presidio=presidio)
+    qis = [q.strip() for q in quasi.split(",")] if quasi else None
+    reid = ReidRiskScanner(qis, sensitive)
+    _finish_scan(pii.scan(target) + reid.scan(target), out, fail_on)
+
+
+@scan_app.command("secrets")
+def scan_secrets_cmd(
+    paths: Annotated[list[Path], typer.Argument(help="Files or directories to scan.")],
+    out: OutOption = None,
+    fail_on: FailOnOption = "high",
+) -> None:
+    """Scan files for API keys, tokens, and private keys."""
+    scanner = SecretsScanner()
+    files = [p for path in paths for p in ([path] if path.is_file() else sorted(path.rglob("*")))]
+    findings = [
+        finding
+        for file in files
+        if file.is_file() and ".git" not in file.parts
+        for finding in scanner.scan(ScanTarget(file, name=str(file)))
+    ]
+    typer.echo(f"scanned {sum(f.is_file() for f in files)} files")
+    _finish_scan(findings, out, fail_on)
 
 
 @app.command()

@@ -74,3 +74,16 @@ build:
   artifacts:
     - path: demo/make_dataset.py
       kind: script
+
+privacy:
+  sample_size: 10000
+  quasi_identifiers: [age, zip, gender]
+  sensitive_column: income
+
+audit:
+  label_column: income
+  members: data/train.csv
+  nonmembers: data/test.csv
+  gap_metric: accuracy
+
+policy: policy.yaml
