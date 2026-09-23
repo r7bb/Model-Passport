@@ -59,6 +59,7 @@ Session 2 added:
 - The quality pass and refactors.
 - Replacing Jinja2 with a typed HTML builder.
 - README screenshots from real runs.
+- A plain-language README for non-technical readers. Installation, usage, commands, and technical details moved to SETUP.md.
 
 Possible next steps, in rough priority order:
 1. Screenshot automation: regenerate `docs/images/` in CI (or with `make docs`) so the README never goes stale.
