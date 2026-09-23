@@ -124,6 +124,40 @@ class RunInfo(_Strict):
     mlflow_run_id: str | None = None
 
 
+class ChangeStatus(StrEnum):
+    ADDED = "added"
+    REMOVED = "removed"
+    CHANGED = "changed"
+    UNCHANGED = "unchanged"
+
+
+class DatasetChange(_Strict):
+    name: str
+    status: ChangeStatus
+    previous_sha256: Sha256Hex | None = None
+    current_sha256: Sha256Hex | None = None
+    previous_rows: int | None = None
+    current_rows: int | None = None
+
+
+class RevisionInfo(_Strict):
+    """Links a rebuilt passport (new data, retraining) to the version it supersedes."""
+
+    previous_passport_id: UUID
+    previous_version: str
+    previous_merkle_root: Sha256Hex
+    previous_created_at: datetime
+    sequence: int = Field(default=1, ge=1, description="1 for the first rebuild, then 2, ...")
+    reason: str | None = None
+    added_artifacts: list[str] = Field(default_factory=list)
+    removed_artifacts: list[str] = Field(default_factory=list)
+    changed_artifacts: list[str] = Field(default_factory=list)
+    dataset_changes: list[DatasetChange] = Field(default_factory=list)
+    metric_deltas: dict[str, dict[str, float]] = Field(
+        default_factory=dict, description="split -> metric -> current minus previous"
+    )
+
+
 class Environment(_Strict):
     python_version: str
     os: str
@@ -254,4 +288,5 @@ class Passport(_Strict):
     policy: PolicyResult | None = None
     declared: Declared = Field(default_factory=Declared)
     lineage_links: list[UUID] = Field(default_factory=list)
+    revision: RevisionInfo | None = None
     events: list[LifecycleEvent] = Field(default_factory=list)

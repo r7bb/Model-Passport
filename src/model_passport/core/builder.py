@@ -19,6 +19,7 @@ from model_passport.core.capture import (
     stages_fingerprint,
 )
 from model_passport.core.config import ProjectConfig, load_config
+from model_passport.core.revision import compute_revision
 from model_passport.core.schema import (
     ArtifactKind,
     ArtifactRef,
@@ -96,8 +97,17 @@ def _add_run_artifacts(manifest: _Manifest, run: RunRecord) -> None:
                 )
 
 
-def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Passport:
-    """Build and sign a passport. Paths in the config are resolved against its directory."""
+def build_passport(
+    config_path: Path,
+    config: ProjectConfig | None = None,
+    previous: Passport | None = None,
+    reason: str | None = None,
+) -> Passport:
+    """Build and sign a passport. Paths in the config are resolved against its directory.
+
+    With ``previous``, the new passport records what changed since that version (new data,
+    retraining) and links to it, forming a verifiable version history.
+    """
     root = config_path.parent.resolve()
     config = config or load_config(config_path)
     inputs = config.build
@@ -200,6 +210,8 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
         declared=config.declared,
         lineage_links=inputs.lineage_links,
     )
+    if previous is not None:
+        passport.revision = compute_revision(previous, passport, reason)
     if policy is not None:
         passport.policy = evaluate(policy, policy_sha256, passport)
     return sign_passport(passport, private_key)
