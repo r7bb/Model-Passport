@@ -1,0 +1,19 @@
+# Model Passport policy gate. `passport build` exits 1 when the overall verdict is fail.
+#
+# Threshold forms:
+#   rule: 5                        fail when violated
+#   rule: {warn: 0.55, fail: 0.60} warn and fail levels
+#   unsafe_pickle: warn            verdict applied when the condition is found
+
+rules:
+  pii_columns_max: 0              # columns containing direct identifiers
+  min_k_anonymity: 5              # smallest equivalence class over quasi-identifiers
+  unique_record_fraction_max: 0.05
+  mia_auc_max: {warn: 0.55, fail: 0.60}
+  generalization_gap_max: {warn: 0.05, fail: 0.10}
+  secrets_found_max: 0
+  unsafe_pickle: fail             # pickles importing dangerous callables (os.system, eval, ...)
+  critical_cves_max: 0
+
+# Verdict for a rule whose evidence was never collected (e.g. the leakage audit did not run).
+missing_evidence: warn
