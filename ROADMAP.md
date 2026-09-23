@@ -60,7 +60,7 @@ State at end of session 1 (2026-09-22): Phases 1-4 are done and tested (110 test
 
 Environment notes: use `.venv` (Python 3.11 from uv, installed at `~/.local/bin`); install with `uv pip install --python .venv/bin/python -e ".[dev,demo,registry,dashboard,mlflow,docs]"`. Set `MLFLOW_DISABLE_AGENT_HINT=1` to silence MLflow's startup message. Tests stub pip-audit (see `tests/conftest.py`); mark a test `@pytest.mark.network` to use the real one. Commits carry no AI attribution lines.
 
-Deviations from CLAUDE.md to confirm with the team:
+Deviations from the original project spec to confirm with the team:
 - Passports carry a top-level `artifacts` manifest plus `run` and `revision` sections that the v0.1 spec did not list.
 - `unsafe_pickle` defaults to `fail` (not `warn`) for pickles importing dangerous callables. Plain raw pickle is a low-severity finding, so it doesn't block.
 - A rule with no evidence (e.g. no leakage audit) yields `missing_evidence: warn`, not a pass.
