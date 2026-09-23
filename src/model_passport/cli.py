@@ -11,7 +11,23 @@ from pydantic import ValidationError
 
 from model_passport.core import identity
 from model_passport.core.builder import BuildError, build_passport, write_passport
-from model_passport.core.config import CONFIG_FILENAME, CONFIG_TEMPLATE, SigningConfig
+from model_passport.core.capture import (
+    CaptureError,
+    git_commit,
+    parse_overrides,
+    run_pipeline,
+    save_run_record,
+)
+from model_passport.core.config import (
+    CONFIG_FILENAME,
+    CONFIG_TEMPLATE,
+    ProjectConfig,
+    SigningConfig,
+    StageConfig,
+    load_config,
+)
+from model_passport.core.schema import PipelineStage
+from model_passport.core.tracking import MlflowTracker, TrackingUnavailable, dvc_add, log_passport
 from model_passport.core.verifier import ArtifactStatus, verify_passport
 
 app = typer.Typer(help="Signed, verifiable passports for trained ML models.", no_args_is_help=True)
@@ -65,15 +81,74 @@ def init(
         typer.echo(f"added {GITIGNORE_ENTRY} to .gitignore")
 
 
+def _warn(message: str) -> None:
+    typer.echo(f"warning: {message}", err=True)
+
+
+def _load(config: Path) -> ProjectConfig:
+    try:
+        return load_config(config)
+    except (OSError, ValidationError, yaml.YAMLError) as exc:
+        typer.echo(f"error: cannot load {config}: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
+@app.command()
+def run(
+    config: Annotated[Path, typer.Option(help="Project config file.")] = Path(CONFIG_FILENAME),
+    set_: Annotated[
+        list[str] | None,
+        typer.Option("--set", help="Override a stage parameter: stage.key=value (repeatable)."),
+    ] = None,
+) -> None:
+    """Run the pipeline stages from passport.yaml and record their provenance."""
+    root = config.parent.resolve()
+    cfg = _load(config)
+
+    tracker: MlflowTracker | None = None
+    if cfg.tracking.mlflow_uri:
+        try:
+            tracker = MlflowTracker(cfg.tracking, root, cfg.project.name)
+            tracker.start(git_commit(root))
+        except TrackingUnavailable as exc:
+            _warn(f"MLflow logging disabled: {exc}")
+            tracker = None
+
+    def on_stage(stage: StageConfig, record: PipelineStage, metrics: dict) -> None:
+        typer.echo(f"stage {stage.name}: ok ({len(record.outputs)} outputs)")
+        if tracker is not None:
+            tracker.log_stage(stage, record, metrics)
+        if cfg.tracking.dvc:
+            try:
+                dvc_add(root, stage.outs)
+            except TrackingUnavailable as exc:
+                _warn(f"DVC tracking skipped: {exc}")
+
+    try:
+        record = run_pipeline(root, cfg, parse_overrides(set_ or []), on_stage=on_stage)
+    except CaptureError as exc:
+        if tracker is not None:
+            tracker.finish(status="FAILED")
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+    if tracker is not None:
+        tracker.finish()
+        record.mlflow_run_id = tracker.parent_run_id
+    path = save_run_record(root, record)
+    typer.echo(f"recorded {len(record.stages)} stages in {path.relative_to(root)}")
+
+
 @app.command()
 def build(
     config: Annotated[Path, typer.Option(help="Project config file.")] = Path(CONFIG_FILENAME),
     out: Annotated[Path, typer.Option(help="Output passport path.")] = Path("passport.json"),
 ) -> None:
     """Hash all artifacts, compute the Merkle root, sign, and write passport.json."""
+    cfg = _load(config)
     try:
-        passport = build_passport(config)
-    except (OSError, BuildError, ValidationError, yaml.YAMLError, ValueError) as exc:
+        passport = build_passport(config, cfg)
+    except (OSError, BuildError, ValidationError, ValueError) as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2) from exc
 
@@ -81,7 +156,21 @@ def build(
     typer.echo(f"wrote {out}")
     typer.echo(f"  passport_id: {passport.identity.passport_id}")
     typer.echo(f"  artifacts:   {len(passport.artifacts)}")
+    typer.echo(f"  stages:      {len(passport.pipeline)}")
     typer.echo(f"  merkle_root: {passport.identity.merkle_root}")
+
+    if passport.run and passport.run.mlflow_run_id:
+        try:
+            log_passport(
+                cfg.tracking,
+                config.parent.resolve(),
+                passport.run.mlflow_run_id,
+                out,
+                {"passport.id": str(passport.identity.passport_id)},
+            )
+            typer.echo(f"  mlflow run:  {passport.run.mlflow_run_id}")
+        except TrackingUnavailable as exc:
+            _warn(f"passport not logged to MLflow: {exc}")
 
 
 @app.command()
