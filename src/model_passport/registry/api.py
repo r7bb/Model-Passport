@@ -83,7 +83,8 @@ def create_app(
     trusted_keys_dir: str | None = None,
 ) -> FastAPI:
     db = RegistryDB(db_path or os.environ.get("PASSPORT_REGISTRY_DB", "registry.db"))
-    token = token if token is not None else os.environ.get("PASSPORT_REGISTRY_TOKEN") or None
+    # An empty token (argument or environment) disables write authentication.
+    token = (token if token is not None else os.environ.get("PASSPORT_REGISTRY_TOKEN")) or None
     trusted = _trusted_fingerprints(trusted_keys_dir or os.environ.get("PASSPORT_TRUSTED_KEYS"))
 
     app = FastAPI(title="Model Passport Registry", version=__version__)

@@ -14,7 +14,9 @@ _COLORS = {
 
 
 def _quote(text: str) -> str:
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    """A DOT string literal; real newlines become line breaks in the rendered label."""
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
 
 
 def pipeline_dot(passport: Passport) -> str:
@@ -48,12 +50,12 @@ def lineage_dot(passport: Passport, names: dict[str, str] | None = None) -> str:
     """This passport, its upstream models, and the version it supersedes."""
     names = names or {}
     me = str(passport.identity.passport_id)
-    label = f"{passport.identity.model_name}\\n{passport.identity.version}"
+    label = f"{passport.identity.model_name}\nv{passport.identity.version}"
     lines = [
         "digraph lineage {",
         '  rankdir=LR; bgcolor="transparent";',
         '  node [fontname="Helvetica", fontsize=11, shape=box, style="rounded,filled"];',
-        f'  {_quote(me)} [label="{label}", fillcolor="#dcfce7"];',
+        f'  {_quote(me)} [label={_quote(label)}, fillcolor="#dcfce7"];',
     ]
     for link in passport.lineage_links:
         uid = str(link)
@@ -64,8 +66,9 @@ def lineage_dot(passport: Passport, names: dict[str, str] | None = None) -> str:
     revision = passport.revision
     if revision is not None:
         uid = str(revision.previous_passport_id)
-        prev_label = names.get(uid, f"{passport.identity.model_name}\\n{revision.previous_version}")
-        lines.append(f'  {_quote(uid)} [label="{prev_label}", fillcolor="#f3f4f6"];')
+        default = f"{passport.identity.model_name}\nv{revision.previous_version}"
+        prev_label = names.get(uid, default)
+        lines.append(f'  {_quote(uid)} [label={_quote(prev_label)}, fillcolor="#f3f4f6"];')
         lines.append(f'  {_quote(uid)} -> {_quote(me)} [label="superseded by", style=dashed];')
     lines.append("}")
     return "\n".join(lines)

@@ -77,7 +77,10 @@ def _performance(
     except UnsafeArtifactError as exc:
         return {"error": str(exc)}
     labeled = batch.dropna(subset=[label])
-    predictions = np.asarray(model.predict(labeled.drop(columns=[label]))).astype(str)
+    try:
+        predictions = np.asarray(model.predict(labeled.drop(columns=[label]))).astype(str)
+    except Exception as exc:  # noqa: BLE001 - a bad batch must not crash monitoring
+        return {"error": f"prediction failed: {exc}"}
     accuracy = float(np.mean(predictions == labeled[label].astype(str).to_numpy()))
     baseline = passport.metrics.get("test", {}).get("accuracy")
     degraded = baseline is not None and accuracy < baseline - tolerance
@@ -126,9 +129,11 @@ def monitor_batch(
     drift = check_drift(
         reference_frame, batch, features, exclude=labels, alpha=alpha, psi_threshold=psi_threshold
     )
-    performance = (
-        _performance(root, passport, batch, labels[0], degradation_tolerance) if labels else None
-    )
+    performance: dict[str, Any] | None = None
+    if labels and not drift.schema.ok:
+        performance = {"skipped": "batch does not match the model's input schema"}
+    elif labels:
+        performance = _performance(root, passport, batch, labels[0], degradation_tolerance)
     degraded = bool(performance and performance.get("degraded"))
     payload = {
         **drift.to_payload(),

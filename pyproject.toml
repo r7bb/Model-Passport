@@ -65,6 +65,11 @@ packages = ["src/model_passport"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = ["network: uses real network services (pip-audit, OSV) instead of stubs"]
+filterwarnings = [
+    # Third-party deprecations inside starlette's TestClient, not our code.
+    "ignore:Using `httpx` with `starlette.testclient`",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

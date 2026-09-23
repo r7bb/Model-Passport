@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jinja2 import Environment, PackageLoader, select_autoescape
+from jinja2 import Environment, PackageLoader, Undefined, select_autoescape
 
 from model_passport.core.schema import Passport, Severity, at_least
 from model_passport.core.verifier import VerificationReport
@@ -19,11 +19,15 @@ def _env() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["short"] = lambda value, n=12: (str(value)[:n] + "…") if value else ""
-    env.filters["pct"] = lambda value: "" if value is None else f"{value:.1%}"
-    env.filters["num"] = lambda value: "" if value is None else f"{value:,.4g}"
+    env.filters["pct"] = lambda value: "" if _missing(value) else f"{value:.1%}"
+    env.filters["num"] = lambda value: "" if _missing(value) else f"{value:,.4g}"
     env.filters["threshold"] = format_threshold
     env.tests["serious"] = lambda finding: at_least(finding.severity, Severity.HIGH)
     return env
+
+
+def _missing(value: object) -> bool:
+    return value is None or isinstance(value, Undefined)
 
 
 def format_threshold(value: object) -> str:

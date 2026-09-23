@@ -153,7 +153,7 @@ def pipeline_view(p: Passport) -> None:
 
 def lineage_view(p: Passport, entries: list[Entry]) -> None:
     names = {
-        e.passport_id: f"{e.model_name}\\nv{e.version} {(e.verdict or '').upper()}" for e in entries
+        e.passport_id: f"{e.model_name}\nv{e.version} {(e.verdict or '').upper()}" for e in entries
     }
     st.graphviz_chart(lineage_dot(p, names), width="stretch")
     if p.revision:

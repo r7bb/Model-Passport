@@ -159,7 +159,7 @@
   {% if pii %}
   <table><tr><th>Severity</th><th>Entity</th><th>Location</th><th>Rows</th><th>Hit rate</th><th>Masked examples</th></tr>
   {% for f in pii %}<tr><td><span class="badge {{ f.severity.value }}">{{ f.severity.value }}</span></td><td class="mono">{{ f.category }}</td><td class="mono">{{ f.location }}</td>
-      <td>{{ f.count }}</td><td>{{ f.details.hit_rate|pct if f.details.hit_rate is not none else "name only" }}</td><td class="mono">{{ f.masked_examples|join(", ") }}</td></tr>{% endfor %}
+      <td>{{ f.count }}</td><td>{{ f.details.get("hit_rate")|pct if f.details.get("hit_rate") is not none else "name only" }}</td><td class="mono">{{ f.masked_examples|join(", ") }}</td></tr>{% endfor %}
   </table>
   {% else %}<p>No PII detected.</p>{% endif %}
 </section>
