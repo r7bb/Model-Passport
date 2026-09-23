@@ -141,16 +141,65 @@ class Finding(_Strict):
     count: int = Field(default=0, ge=0)
     message: str = ""
     masked_examples: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(
+        default_factory=dict, description="Scores and rates only (e.g. hit_rate, confidence)."
+    )
+
+
+SEVERITY_ORDER = [Severity.INFO, Severity.LOW, Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL]
+
+
+def at_least(severity: Severity, minimum: Severity) -> bool:
+    return SEVERITY_ORDER.index(severity) >= SEVERITY_ORDER.index(minimum)
+
+
+class RiskyCombination(_Strict):
+    columns: list[str]
+    unique_fraction: float
+
+
+class ReidentificationResult(_Strict):
+    dataset: str
+    rows: int
+    quasi_identifiers: list[str]
+    k_anonymity: int | None = Field(description="Smallest equivalence class size.")
+    unique_fraction: float
+    sensitive_column: str | None = None
+    l_diversity: int | None = None
+    risky_combinations: list[RiskyCombination] = Field(default_factory=list)
+
+
+class LeakageResult(_Strict):
+    attack: str = "loss_threshold"
+    mia_auc: float
+    tpr_at_low_fpr: float
+    low_fpr: float = 0.01
+    members: int
+    nonmembers: int
+    generalization_gap: float | None = None
+    gap_metric: str | None = None
 
 
 class PrivacyReport(_Strict):
+    datasets_scanned: list[str] = Field(default_factory=list)
     data_findings: list[Finding] = Field(default_factory=list)
-    reidentification: dict[str, Any] = Field(default_factory=dict)
-    leakage: dict[str, Any] = Field(default_factory=dict)
+    reidentification: list[ReidentificationResult] = Field(default_factory=list)
+    leakage: LeakageResult | None = None
+
+
+class DependencyAudit(StrEnum):
+    OK = "ok"
+    NOT_RUN = "not_run"
+    ERROR = "error"
 
 
 class SecurityReport(_Strict):
+    files_scanned_for_secrets: int | None = None
+    secret_findings: list[Finding] = Field(default_factory=list)
+    artifacts_scanned: list[str] = Field(default_factory=list)
     artifact_findings: list[Finding] = Field(default_factory=list)
+    dependency_audit: DependencyAudit = DependencyAudit.NOT_RUN
+    dependency_audit_message: str = ""
     dependency_vulnerabilities: list[Finding] = Field(default_factory=list)
 
 
