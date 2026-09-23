@@ -21,7 +21,8 @@ Model Passport is released under the MIT License (see [LICENSE](LICENSE)). It bu
 | scikit-learn | BSD-3-Clause |
 | PyArrow | Apache-2.0 |
 | picklescan | MIT |
-| Jinja2 | BSD-3-Clause |
+| joblib | BSD-3-Clause |
+| pip-audit | Apache-2.0 |
 
 ## Optional dependencies
 
@@ -31,7 +32,6 @@ Model Passport is released under the MIT License (see [LICENSE](LICENSE)). It bu
 | Streamlit | Apache-2.0 | Dashboard |
 | MLflow | Apache-2.0 | Experiment tracking |
 | DVC | Apache-2.0 | Data versioning |
-| pip-audit | Apache-2.0 | Dependency vulnerability audit |
 | Presidio | MIT | Free-text PII detection |
 | Faker | MIT | Synthetic demo data |
 

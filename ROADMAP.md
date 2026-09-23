@@ -9,6 +9,7 @@ Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.223
 | Tabular only or tabular plus text? | Tabular first. Free text columns are scanned with our regex validators; Presidio is an optional extra (`pip install model-passport[presidio]`). | Keeps the default install light and CI fast. Presidio needs a spaCy model download. |
 | Streamlit or React dashboard? | Streamlit | Fastest to build; the registry API stays UI-agnostic, so a React client can be added later. |
 | Which stretch goal first? | None in the MVP. Shadow model attacks are next (see Later). | The loss threshold attack already shows the overfit vs regularized contrast the demo needs. |
+| HTML report rendering | Typed Python builder (`report/html.py`) instead of Jinja2 | Type-checked and linted like the rest of the code, no template language or dependency, and escaping is still automatic. |
 | Model formats for leakage audit | scikit-learn estimators saved with pickle/joblib, loaded only after a pickle safety scan | Matches the demo; ONNX and safetensors are recognized as safe formats by the artifact scanner. |
 
 ## Phases
@@ -38,7 +39,7 @@ Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.223
 
 ### Phase 5: Registry, report, dashboard (built; tests and Docker Compose pending)
 - FastAPI and SQLite registry: upload, list, get, verify, and events endpoints, with an optional bearer token for writes.
-- Static `passport.html` report rendered with Jinja2, and JSON-LD export using W3C PROV terms.
+- Static `passport.html` report rendered by a small typed Python HTML builder (escape-by-default, no template engine), and JSON-LD export using W3C PROV terms.
 - Streamlit dashboard: model picker, verdict, lineage, pipeline DAG, scan results, and a plain-language "simple view".
 - Docker Compose running MLflow, MinIO (as MLflow's artifact store), the registry, and the dashboard.
 
