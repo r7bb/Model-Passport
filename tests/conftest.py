@@ -5,13 +5,28 @@ from pathlib import Path
 import pytest
 import yaml
 
-from model_passport.core import identity
+from model_passport.core import assess, identity
 from model_passport.core.config import CONFIG_FILENAME, CONFIG_TEMPLATE
+from model_passport.core.schema import DependencyAudit
 
 
 @pytest.fixture(autouse=True)
 def _no_passphrase(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(identity.PASSPHRASE_ENV, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _offline_dependency_audit(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Builds in tests must not call pip-audit or OSV over the network."""
+    if "network" in request.keywords:
+        return
+    monkeypatch.setattr(
+        assess,
+        "audit_dependencies",
+        lambda deps: (DependencyAudit.OK, f"audited {len(deps)} packages (stubbed)", []),
+    )
 
 
 @pytest.fixture

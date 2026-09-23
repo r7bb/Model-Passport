@@ -31,6 +31,8 @@ from model_passport.core.schema import (
 )
 
 VERDICT_ORDER = [Verdict.PASS, Verdict.WARN, Verdict.FAIL]
+# A pickle we cannot parse is as untrustworthy as one importing os.system.
+UNSAFE_ARTIFACT_CATEGORIES = {"UNSAFE_PICKLE", "SCAN_ERROR"}
 
 
 class PolicyError(Exception):
@@ -131,7 +133,7 @@ def _unsafe_pickles(p: Passport) -> int | None:
     report = p.security_report
     if report is None or not report.artifacts_scanned:
         return Missing
-    return sum(1 for f in report.artifact_findings if f.category == "UNSAFE_PICKLE")
+    return sum(1 for f in report.artifact_findings if f.category in UNSAFE_ARTIFACT_CATEGORIES)
 
 
 def _cves(severity: Severity) -> Callable[[Passport], int | None]:

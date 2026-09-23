@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from model_passport.core import identity
+from model_passport.core.events import verify_events
 from model_passport.core.schema import ArtifactKind, Passport
 
 
@@ -35,6 +36,7 @@ class VerificationReport:
     merkle_ok: bool = False
     fingerprint_ok: bool = False
     signature_ok: bool = False
+    event_errors: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -46,6 +48,7 @@ class VerificationReport:
         return (
             not self.errors
             and not self.changed
+            and not self.event_errors
             and self.merkle_ok
             and self.fingerprint_ok
             and self.signature_ok
@@ -70,18 +73,37 @@ def verify_passport(passport_path: Path, public_key_path: Path, root: Path) -> V
     report = VerificationReport()
     try:
         raw: dict[str, Any] = json.loads(passport_path.read_text(encoding="utf-8"))
-        passport = Passport.model_validate(raw)
-    except (OSError, json.JSONDecodeError, ValidationError) as exc:
+    except (OSError, json.JSONDecodeError) as exc:
         report.errors.append(f"cannot read passport: {exc}")
         return report
-
     try:
         public_key = identity.load_public_key(public_key_path)
     except (OSError, ValueError) as exc:
         report.errors.append(f"cannot load public key: {exc}")
         return report
 
-    report.artifacts = [_check_artifact(root, a.path, a.kind, a.sha256) for a in passport.artifacts]
+    report = verify_document(raw, public_key)
+    if not report.errors:
+        passport = Passport.model_validate(raw)
+        report.artifacts = [
+            _check_artifact(root, a.path, a.kind, a.sha256) for a in passport.artifacts
+        ]
+    return report
+
+
+def verify_document(
+    raw: dict[str, Any], public_key: identity.Ed25519PublicKey
+) -> VerificationReport:
+    """Integrity checks that need no artifact files: schema, Merkle root, key, signature, events.
+
+    Used by the registry, which stores passports but not the artifacts they describe.
+    """
+    report = VerificationReport()
+    try:
+        passport = Passport.model_validate(raw)
+    except ValidationError as exc:
+        report.errors.append(f"invalid passport: {exc}")
+        return report
     report.merkle_ok = (
         identity.merkle_root(a.sha256 for a in passport.artifacts) == passport.identity.merkle_root
     )
@@ -92,4 +114,5 @@ def verify_passport(passport_path: Path, public_key_path: Path, root: Path) -> V
     report.signature_ok = bool(signature) and identity.verify_signature(
         public_key, identity.signing_payload(raw), signature or ""
     )
+    report.event_errors = verify_events(raw, public_key)
     return report

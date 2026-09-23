@@ -8,6 +8,7 @@ import pytest
 from model_passport.core import identity
 from model_passport.core.builder import BuildError, build_passport, write_passport
 from model_passport.core.config import CONFIG_FILENAME
+from model_passport.core.events import append_event
 from model_passport.core.verifier import ArtifactStatus, VerificationReport, verify_passport
 
 
@@ -120,12 +121,37 @@ def test_wrong_public_key_fails(project: Path, tmp_path: Path) -> None:
     assert not report.fingerprint_ok and not report.signature_ok and not report.ok
 
 
-def test_appended_events_do_not_break_signature(project: Path) -> None:
+def test_signed_events_keep_passport_valid(project: Path) -> None:
     passport = _build(project)
+    key = identity.load_private_key(project / ".passport/signing_key.pem")
     data = json.loads(passport.read_text())
-    data["events"].append({"event_type": "drift_check", "payload": {"ks_p": 0.4}})
+    append_event(data, "drift_check", {"drift_detected": False}, key)
+    append_event(data, "drift_check", {"drift_detected": True}, key)
     passport.write_text(json.dumps(data))
     assert _verify(project, passport).ok
+
+
+def test_forged_or_reordered_events_fail(project: Path) -> None:
+    passport = _build(project)
+    key = identity.load_private_key(project / ".passport/signing_key.pem")
+    data = json.loads(passport.read_text())
+    append_event(data, "drift_check", {"n": 1}, key)
+    append_event(data, "drift_check", {"n": 2}, key)
+
+    forged = json.loads(json.dumps(data))
+    forged["events"][0]["payload"]["n"] = 99
+    passport.write_text(json.dumps(forged))
+    assert any("invalid signature" in e for e in _verify(project, passport).event_errors)
+
+    reordered = json.loads(json.dumps(data))
+    reordered["events"].reverse()
+    passport.write_text(json.dumps(reordered))
+    assert any("chain broken" in e for e in _verify(project, passport).event_errors)
+
+    unsigned = json.loads(json.dumps(data))
+    unsigned["events"].append({"event_type": "drift_check", "payload": {}})
+    passport.write_text(json.dumps(unsigned))
+    assert not _verify(project, passport).ok
 
 
 def test_unreadable_passport_reports_error(project: Path) -> None:
