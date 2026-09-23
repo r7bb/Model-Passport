@@ -13,6 +13,7 @@ build/
 *.pem
 .env
 .env.*
+!.env.example
 
 # Local data and generated artifacts
 data/
@@ -22,3 +23,8 @@ mlflow.db
 /passport.json
 /passport.html
 /passport.jsonld
+
+# Test coverage data
+.coverage
+coverage.xml
+htmlcov/

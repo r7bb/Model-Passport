@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install "ruff>=0.5"
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -e ".[dev,demo,registry,dashboard]"
+      - run: pytest --cov=model_passport --cov-report=term-missing:skip-covered
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+
+  demo:
+    # The policy gate: `passport build` exits 1 on a fail verdict, so a push that lets PII,
+    # a leaky model, a secret, or a critical CVE into the demo fails this job.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[demo]"
+      - name: Scan the repository for committed secrets
+        run: passport scan secrets src demo dashboard passport.yaml policy.yaml
+      - name: Certify, monitor, retrain, re-certify
+        run: bash demo/update_cycle.sh
+      - name: Verify the final passport
+        run: passport verify passport.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: passport
+          path: |
+            passport.json
+            passport.html
+            .passport/history/
+          if-no-files-found: ignore
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create an env file for CI only
+        run: |
+          cp .env.example .env
+          sed -i "s/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)/" .env
+      - run: docker compose config --quiet
+      - run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Health checks
+        run: |
+          curl -fsS http://localhost:8000/health
+          curl -fsS http://localhost:5000/health
+          curl -fsS http://localhost:8501/_stcore/health
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import secrets as pysecrets
+import random
 import string
 from pathlib import Path
 
@@ -13,9 +13,12 @@ from model_passport.scanners.secrets import (
     shannon_entropy,
 )
 
+# Seeded so fixtures are reproducible; these are fake credentials, never real ones.
+_RNG = random.Random(20260923)
+
 
 def _random(alphabet: str, n: int) -> str:
-    return "".join(pysecrets.choice(alphabet) for _ in range(n))
+    return "".join(_RNG.choice(alphabet) for _ in range(n))
 
 
 ALNUM = string.ascii_letters + string.digits
@@ -41,7 +44,7 @@ def test_detects_known_patterns(tmp_path: Path) -> None:
             f"AWS_KEY = '{aws}'",
             f"token: {gh}",
             "-----BEGIN OPENSSH PRIVATE KEY-----",
-            f"password = '{_random(ALNUM, 16)}'",
+            "password = 'Xk9mP2vL7qRz4tWb'",  # a literal with digits, not an identifier
             "sk-" + _random(ALNUM, 40),
         ]
     )
