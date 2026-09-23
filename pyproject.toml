@@ -102,6 +102,7 @@ max-args = 8
 "tests/**" = ["S", "PLR0913", "ARG", "PLC0415", "N806"]  # N806: sklearn-style X
 "demo/**" = ["T20", "S301", "N803", "N806"]  # scripts print; own pickle; sklearn-style X
 "scripts/**" = ["T20"]
+"src/model_passport/ml/**" = ["N803", "N806"]  # scikit-learn naming: X is the feature matrix
 # Typer commands declare one parameter per CLI option; the count is the interface, not a smell.
 "src/model_passport/cli/**" = ["PLR0913", "PLR0917"]
 

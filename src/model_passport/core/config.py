@@ -184,3 +184,115 @@ build:
     # test: {{accuracy: 0.91}}
   lineage_links: []
 """
+
+
+DATA_CONFIG_TEMPLATE = """\
+# Model Passport project for {data}, predicting `{label}`.
+# Created by `passport init --data`. Next: `passport run && passport build`.
+# Paths are relative to the directory containing this file.
+
+project:
+  name: {name}
+  version: 0.1.0
+
+signing:
+  private_key: .passport/signing_key.pem   # never commit this file
+  public_key: .passport/signing_key.pub
+
+stages:
+  # Ready-made stages that adapt to the data (see model_passport.ml.stages).
+  # Replace any script with your own; keep the same inputs and outputs.
+  - name: preprocess
+    cmd: python stages/preprocess.py
+    params:
+      input: {data}
+      label: {label}
+      drop_identifiers: true      # drop columns the PII scan flags (names, emails, IDs...)
+      generalize: true            # bucket quasi-identifiers such as age and ZIP code
+      quasi_identifiers: auto     # or a list, e.g. [age, zip, gender]
+      test_size: 0.25
+      seed: 7
+    deps: [{data}]
+    outs: [data/train.csv, data/test.csv, data/preprocess.json]
+
+  - name: train
+    cmd: python stages/train.py
+    params:
+      label: {label}
+      model: auto                 # auto | linear | boosting | forest
+      cv_folds: 5
+      max_gap: 0.05               # reject candidates that overfit more than this
+      search: full                # full | quick
+      seed: 7
+    deps: [data/train.csv, data/preprocess.json]
+    outs: [models/model.pkl, models/model_info.json, models/cv_metrics.json, models/selection.json]
+    metrics: models/cv_metrics.json
+
+  - name: evaluate
+    cmd: python stages/evaluate.py
+    params:
+      label: {label}
+    deps: [models/model.pkl, models/model_info.json, data/train.csv, data/test.csv]
+    outs: [models/metrics.json]
+    metrics: models/metrics.json
+
+declared:                         # shown in the report; fill these in
+  intended_use: null
+  out_of_scope_uses: []
+  known_limitations: []
+  ethical_risks: []
+  owner: null
+  contact: null
+
+build:
+  model:
+    path: models/model.pkl
+    metadata: models/model_info.json
+  datasets:
+    - path: data/train.csv
+      split_role: train
+      source: {data}
+    - path: data/test.csv
+      split_role: test
+      source: {data}
+
+privacy:
+  quasi_identifiers: {quasi}
+  sensitive_column: null
+
+audit:
+  label_column: {label}
+
+policy: policy.yaml
+"""
+
+STAGE_SCRIPT_TEMPLATE = '''\
+"""{stage} stage created by `passport init --data`. See model_passport.ml.stages.{stage}."""
+
+from model_passport.ml.stages import run
+
+if __name__ == "__main__":
+    run("{stage}")
+'''
+
+POLICY_TEMPLATE = """\
+# Model Passport policy gate. `passport build` exits 1 when the overall verdict is fail.
+#
+# Threshold forms:
+#   rule: 5                        fail when violated
+#   rule: {warn: 0.55, fail: 0.60} warn and fail levels
+#   unsafe_pickle: warn            verdict applied when the condition is found
+
+rules:
+  pii_columns_max: 0              # columns containing direct identifiers
+  min_k_anonymity: 5              # smallest group sharing the same quasi-identifier values
+  unique_record_fraction_max: 0.05
+  mia_auc_max: {warn: 0.55, fail: 0.60}
+  generalization_gap_max: {warn: 0.05, fail: 0.10}
+  secrets_found_max: 0
+  unsafe_pickle: fail             # pickles importing dangerous callables (os.system, eval, ...)
+  critical_cves_max: 0
+
+# Verdict for a rule whose evidence was never collected (e.g. the leakage audit did not run).
+missing_evidence: warn
+"""

@@ -1,4 +1,4 @@
-"""Operations commands: monitor (drift), serve (registry), push (upload)."""
+"""Operations commands: prepare (new batches), monitor (drift), serve (registry), push."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import typer
 from model_passport.cli._app import EXIT_FAIL, app, fail, warn
 from model_passport.core import identity
 from model_passport.core.config import SigningConfig
+from model_passport.ml.stages import prepare_batch
+from model_passport.ml.task import DataError
 from model_passport.monitoring.drift import DEFAULT_ALPHA, DEFAULT_PSI_THRESHOLD
 from model_passport.monitoring.monitor import (
     DEFAULT_DEGRADATION_TOLERANCE,
@@ -52,11 +54,42 @@ def _print_monitor(result: MonitorResult) -> None:
             f"tests rejected={feature.rejected}/{len(feature.tests)}"
         )
     perf = result.performance
-    if perf and "accuracy" in perf:
-        baseline = "?" if perf["baseline_accuracy"] is None else perf["baseline_accuracy"]
+    if perf and "metric" in perf:
+        metric = perf["metric"]
+        baseline = perf.get(f"baseline_{metric}")
         degraded = " (DEGRADED)" if perf["degraded"] else ""
-        typer.echo(f"  live accuracy {perf['accuracy']:.3f} vs test {baseline}{degraded}")
+        typer.echo(
+            f"  live {metric} {perf[metric]:.3f} vs test {'?' if baseline is None else baseline}"
+            f"{degraded}"
+        )
+    elif perf and "error" in perf:
+        typer.echo(f"  performance check skipped: {perf['error']}")
     typer.echo("retraining recommended" if result.retrain_recommended else "no retraining needed")
+
+
+@app.command()
+def prepare(
+    batch: Annotated[Path, typer.Argument(help="Raw batch (CSV, TSV, Parquet, or JSONL).")],
+    out: Annotated[
+        Path | None, typer.Option(help="Output CSV (default: <batch>.prepared.csv).")
+    ] = None,
+    passport: Annotated[Path, typer.Option(help="Passport whose preprocessing to apply.")] = Path(
+        "passport.json"
+    ),
+    root: Annotated[Path, typer.Option(help="Project root.")] = Path(),
+) -> None:
+    """Prepare a raw batch exactly like the certified model's training data.
+
+    Drops the same identifier columns and applies the same buckets, using the preprocessing
+    manifest the passport certifies. Then check it with `passport monitor drift`.
+    """
+    target = out or batch.with_name(f"{batch.stem}.prepared.csv")
+    try:
+        rows = prepare_batch(passport, batch, target, root)
+    except (DataError, OSError, ValueError) as exc:
+        fail(str(exc))
+    typer.echo(f"prepared {rows} rows -> {target}")
+    typer.echo(f"next: passport monitor drift {target}")
 
 
 @monitor_app.command("drift")

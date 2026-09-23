@@ -14,12 +14,12 @@ passport build --no-link
 
 step "2. A stable batch arrives: no retraining needed"
 python demo/make_dataset.py --rows 1000 --seed 101 --out data/batches/stable.csv
-python demo/prepare_batch.py data/batches/stable.csv --out data/batches/stable.prepared.csv
+passport prepare data/batches/stable.csv --out data/batches/stable.prepared.csv
 passport monitor drift data/batches/stable.prepared.csv
 
 step "3. A shifted batch arrives: drift is detected"
 python demo/make_dataset.py --rows 1000 --seed 102 --drift 0.7 --out data/batches/shifted.csv
-python demo/prepare_batch.py data/batches/shifted.csv --out data/batches/shifted.prepared.csv
+passport prepare data/batches/shifted.csv --out data/batches/shifted.prepared.csv
 if passport monitor drift data/batches/shifted.prepared.csv; then
   echo "expected drift" >&2
   exit 1

@@ -63,6 +63,10 @@ def _describe_provenance(passport: Passport, summary: Summary) -> None:
     test = passport.metrics.get("test", {})
     if "accuracy" in test:
         summary.points.append(f"Correct on {test['accuracy']:.0%} of held-out test examples.")
+    elif "r2" in test:
+        summary.points.append(
+            f"Explains {max(test['r2'], 0):.0%} of the variation in held-out test examples."
+        )
 
 
 def _describe_data(privacy: PrivacyReport, summary: Summary) -> None:

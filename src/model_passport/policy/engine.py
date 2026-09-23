@@ -149,17 +149,29 @@ class Rule:
     evidence: Callable[[Passport], Any]
     kind: str  # "max": observed must be <= threshold; "min": >=; "flag": verdict if observed > 0
     description: str
+    hint: str = ""  # how to collect the evidence when it is missing
+
+
+QUASI_HINT = "no quasi-identifiers found; list them under privacy.quasi_identifiers"
+SENSITIVE_HINT = "set privacy.sensitive_column"
+LEAKAGE_HINT = "set audit.label_column and declare train and test datasets"
 
 
 RULES: dict[str, Rule] = {
     "pii_columns_max": Rule(_pii_columns, "max", "columns containing direct identifiers"),
-    "min_k_anonymity": Rule(_min_k, "min", "k-anonymity over quasi-identifiers"),
-    "unique_record_fraction_max": Rule(_max_unique, "max", "fraction of unique records"),
-    "min_l_diversity": Rule(_min_l, "min", "l-diversity of the sensitive column"),
-    "mia_auc_max": Rule(_leakage("mia_auc"), "max", "membership inference attack AUC"),
-    "mia_tpr_at_low_fpr_max": Rule(_leakage("tpr_at_low_fpr"), "max", "attack TPR at low FPR"),
+    "min_k_anonymity": Rule(_min_k, "min", "k-anonymity over quasi-identifiers", QUASI_HINT),
+    "unique_record_fraction_max": Rule(
+        _max_unique, "max", "fraction of unique records", QUASI_HINT
+    ),
+    "min_l_diversity": Rule(_min_l, "min", "l-diversity of the sensitive column", SENSITIVE_HINT),
+    "mia_auc_max": Rule(
+        _leakage("mia_auc"), "max", "membership inference attack AUC", LEAKAGE_HINT
+    ),
+    "mia_tpr_at_low_fpr_max": Rule(
+        _leakage("tpr_at_low_fpr"), "max", "attack TPR at low FPR", LEAKAGE_HINT
+    ),
     "generalization_gap_max": Rule(
-        _leakage("generalization_gap"), "max", "train minus test metric"
+        _leakage("generalization_gap"), "max", "train minus test metric", LEAKAGE_HINT
     ),
     "secrets_found_max": Rule(_secrets, "max", "confirmed secrets in data and scripts"),
     "unsafe_pickle": Rule(_unsafe_pickles, "flag", "pickle files with dangerous imports"),
@@ -192,7 +204,8 @@ def evaluate_rule(name: str, threshold: Any, passport: Passport, missing: Verdic
     if observed is Missing:
         return RuleResult(
             name=name, threshold=threshold, observed=None, result=missing,
-            message=f"not evaluated: no evidence for {rule.description}",
+            message=f"not evaluated: no evidence for {rule.description}"
+            + (f" ({rule.hint})" if rule.hint else ""),
         )  # fmt: skip
 
     if rule.kind == "flag":

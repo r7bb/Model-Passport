@@ -30,6 +30,9 @@ from model_passport.core.capture import (
 from model_passport.core.config import (
     CONFIG_FILENAME,
     CONFIG_TEMPLATE,
+    DATA_CONFIG_TEMPLATE,
+    POLICY_TEMPLATE,
+    STAGE_SCRIPT_TEMPLATE,
     ProjectConfig,
     SigningConfig,
     StageConfig,
@@ -44,6 +47,9 @@ from model_passport.core.tracking import (
     log_passport,
 )
 from model_passport.core.verifier import ArtifactStatus, VerificationReport, verify_passport
+from model_passport.ml.features import infer_plan, read_table
+from model_passport.ml.privacy import detect_identifiers, quasi_identifiers
+from model_passport.ml.task import DataError, infer_task
 from model_passport.report.render import write_html
 
 GITIGNORE_ENTRY = ".passport/"
@@ -69,25 +75,87 @@ def _read_passport(path: Path) -> Passport:
         fail(f"cannot read passport {path}: {exc}")
 
 
+def _write_new(path: Path, content: str, force: bool) -> bool:
+    """Write ``content`` unless the file exists (or ``force``); returns whether it wrote."""
+    if path.exists() and not force:
+        typer.echo(f"kept existing {path.name}")
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def _describe_data(root: Path, data: Path, label: str | None) -> tuple[str, str]:
+    """Check the dataset and label, print what was found; returns (relative path, quasi)."""
+    full = data if data.is_absolute() else Path.cwd() / data
+    if not full.is_file():
+        fail(f"dataset not found: {data}")
+    if not label:
+        fail("--label is required with --data: name the column to predict")
+    try:
+        frame = read_table(full)
+        if label not in frame.columns:
+            fail(f"label {label!r} is not a column of {data}; columns: {list(frame.columns)}")
+        task = infer_task(frame[label])
+    except (DataError, OSError, ValueError) as exc:
+        fail(f"cannot use {data}: {exc}")
+    identifiers = detect_identifiers(frame, keep=[label])
+    quasi = quasi_identifiers(frame.drop(columns=identifiers), "auto", exclude=[label])
+    unused = infer_plan(frame.drop(columns=identifiers), label).dropped
+    typer.echo(f"{data}: {len(frame):,} rows, {len(frame.columns)} columns; `{label}` is {task}")
+    typer.echo(f"  identifiers to drop: {', '.join(identifiers) or 'none found'}")
+    typer.echo(f"  quasi-identifiers:   {', '.join(quasi) or 'none found'}")
+    if unused:
+        typer.echo(f"  unused columns:      {', '.join(f'{c} ({r})' for c, r in unused.items())}")
+    try:
+        relative = full.resolve().relative_to(root).as_posix()
+    except ValueError:
+        relative = full.resolve().as_posix()
+    return relative, "[" + ", ".join(quasi) + "]" if quasi else "null"
+
+
+def _init_data_project(root: Path, name: str, data: Path, label: str | None, force: bool) -> None:
+    relative, quasi = _describe_data(root, data, label)
+    config = DATA_CONFIG_TEMPLATE.format(name=name, data=relative, label=label, quasi=quasi)
+    if _write_new(root / CONFIG_FILENAME, config, force):
+        typer.echo(f"wrote {CONFIG_FILENAME} with ready-made preprocess, train, evaluate stages")
+    for stage in ("preprocess", "train", "evaluate"):
+        script = root / "stages" / f"{stage}.py"
+        if _write_new(script, STAGE_SCRIPT_TEMPLATE.format(stage=stage), force):
+            typer.echo(f"wrote stages/{stage}.py")
+    if _write_new(root / "policy.yaml", POLICY_TEMPLATE, force):
+        typer.echo("wrote policy.yaml (the pass/fail limits)")
+
+
 @app.command()
 def init(
     directory: Annotated[Path, typer.Argument(help="Project directory.")] = Path(),
     name: Annotated[
         str | None, typer.Option(help="Model name (defaults to directory name).")
     ] = None,
+    data: Annotated[
+        Path | None,
+        typer.Option(help="Your dataset (CSV, TSV, Parquet, JSONL): sets up ready-made stages."),
+    ] = None,
+    label: Annotated[
+        str | None, typer.Option(help="Column to predict (required with --data).")
+    ] = None,
     force: Annotated[
         bool, typer.Option("--force", help="Overwrite an existing config and signing key.")
     ] = False,
 ) -> None:
-    """Set up a project: passport.yaml, an Ed25519 signing keypair, and .gitignore entries."""
+    """Set up a project: passport.yaml, an Ed25519 signing keypair, and .gitignore entries.
+
+    With --data and --label, also writes stages that clean, train, and evaluate a model on
+    that dataset, so `passport run && passport build` works straight away.
+    """
     root = directory.resolve()
     root.mkdir(parents=True, exist_ok=True)
+    model_name = name or root.name
 
-    config_path = root / CONFIG_FILENAME
-    if config_path.exists() and not force:
-        typer.echo(f"kept existing {CONFIG_FILENAME}")
-    else:
-        config_path.write_text(CONFIG_TEMPLATE.format(name=name or root.name), encoding="utf-8")
+    if data is not None:
+        _init_data_project(root, model_name, data, label, force)
+    elif _write_new(root / CONFIG_FILENAME, CONFIG_TEMPLATE.format(name=model_name), force):
         typer.echo(f"wrote {CONFIG_FILENAME}")
 
     signing = SigningConfig()
@@ -102,6 +170,8 @@ def init(
     typer.echo(f"public key fingerprint: {fingerprint}")
     if _ensure_gitignored(root):
         typer.echo(f"added {GITIGNORE_ENTRY} to .gitignore")
+    if data is not None:
+        typer.echo("next: passport run && passport build")
 
 
 def _start_tracker(cfg: ProjectConfig, root: Path) -> MlflowTracker | None:

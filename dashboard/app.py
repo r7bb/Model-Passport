@@ -99,10 +99,15 @@ def header(p: Passport, verification: dict[str, Any]) -> None:
     privacy = p.privacy_report
     leakage = privacy.leakage if privacy else None
     ks = [r.k_anonymity for r in (privacy.reidentification if privacy else []) if r.k_anonymity]
-    accuracy = p.metrics.get("test", {}).get("accuracy")
+    test = p.metrics.get("test", {})
+    score_name = "accuracy" if "accuracy" in test or "r2" not in test else "r2"
+    score = test.get(score_name)
     cols = st.columns(5)
     cols[0].metric("Signature", "valid" if verification.get("ok") else "INVALID")
-    cols[1].metric("Test accuracy", f"{accuracy:.3f}" if accuracy is not None else "–")
+    cols[1].metric(
+        "Test accuracy" if score_name == "accuracy" else "Test R²",
+        f"{score:.3f}" if score is not None else "–",
+    )
     cols[2].metric(
         "Attack AUC",
         f"{leakage.mia_auc:.3f}" if leakage else "–",
@@ -245,6 +250,11 @@ def security_view(p: Passport) -> None:
     st.caption(sr.dependency_audit_message)
 
 
+def _live_score(perf: dict[str, Any]) -> str | None:
+    metric = perf.get("metric", "accuracy" if "accuracy" in perf else None)
+    return None if metric is None or metric not in perf else f"{metric} {perf[metric]}"
+
+
 def _drift_row(e: LifecycleEvent) -> dict[str, Any]:
     payload = e.payload
     return {
@@ -253,7 +263,7 @@ def _drift_row(e: LifecycleEvent) -> dict[str, Any]:
         "rows": payload.get("rows"),
         "drift": payload.get("drift_detected"),
         "drifted features": ", ".join(payload.get("drifted_features", [])),
-        "live accuracy": (payload.get("performance") or {}).get("accuracy"),
+        "live score": _live_score(payload.get("performance") or {}),
         "retrain": payload.get("retrain_recommended"),
     }
 

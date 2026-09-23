@@ -65,11 +65,7 @@ def test_label_and_features_selection() -> None:
 
 def test_schema_problems() -> None:
     reference = _frame(500, 1)
-    batch = (
-        _frame(500, 2)
-        .drop(columns=["income"])
-        .assign(hours=lambda d: d["hours"].astype(str), extra=1)
-    )
+    batch = _frame(500, 2).drop(columns=["income"]).assign(hours="forty", extra=1)
     batch.loc[:200, "color"] = None
     check = check_schema(reference, batch, ["hours", "income", "color"])
     assert check.missing_columns == ["income"]
@@ -83,6 +79,34 @@ def test_schema_problems() -> None:
     payload = report.to_payload()
     assert payload["schema_ok"] is False
     assert payload["schema"]["missing_columns"] == ["income"]
+
+
+def test_numbers_and_dates_stored_as_text_are_compared_by_value() -> None:
+    reference = _frame(500, 1)
+    batch = _frame(500, 2).assign(hours=lambda d: d["hours"].map(lambda v: f"{v:,.1f}"))
+    assert check_schema(reference, batch, ["hours"]).type_mismatches == []
+    report = check_drift(reference, batch, exclude=["label"])
+    assert {f.feature: f.kind for f in report.features}["hours"] == "numeric"
+
+    days = pd.date_range("2024-01-01", periods=500, freq="D")
+    dated_ref = pd.DataFrame({"when": days.strftime("%Y-%m-%d")})
+    shifted = pd.DataFrame({"when": (days + pd.Timedelta(days=400)).strftime("%Y-%m-%d")})
+    same = check_drift(dated_ref, dated_ref).features[0]
+    assert (same.kind, same.drifted) == ("datetime", False)
+    assert check_drift(dated_ref, shifted).features[0].drifted
+
+
+def test_identifier_columns_are_skipped_and_long_tails_pooled() -> None:
+    rng = np.random.default_rng(0)
+    reference = pd.DataFrame(
+        {"user_id": np.arange(500), "city": rng.choice([f"c{i}" for i in range(200)], 500)}
+    )
+    batch = pd.DataFrame(
+        {"user_id": np.arange(500, 1000), "city": rng.choice([f"c{i}" for i in range(200)], 500)}
+    )
+    report = check_drift(reference, batch)
+    assert [f.feature for f in report.features] == ["city"]
+    assert not report.drift_detected  # same distribution; pooling keeps the PSI small
 
 
 def test_unseen_categories_counted() -> None:

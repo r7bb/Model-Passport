@@ -8,12 +8,16 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sklearn.metrics import r2_score
 
 from model_passport.auditors.artifact import UnsafeArtifactError, safe_load_pickle
+from model_passport.auditors.leakage import is_regressor
 from model_passport.core import identity
 from model_passport.core.events import append_event
 from model_passport.core.schema import ArtifactKind, DatasetInfo, Passport, SplitRole
+from model_passport.ml.features import category_text
 from model_passport.monitoring.drift import (
     DEFAULT_ALPHA,
     DEFAULT_PSI_THRESHOLD,
@@ -75,10 +79,21 @@ def _reference_dataset(passport: Passport, name: str | None) -> DatasetInfo:
     raise MonitorError(f"no reference dataset {name or '(train split)'} in passport")
 
 
+def _live_score(model: Any, labeled: Any, label: str) -> tuple[str, float]:
+    """Accuracy for classifiers, R² for regressors, on a labeled batch."""
+    features = labeled.drop(columns=[label])
+    if is_regressor(model):
+        target = pd.to_numeric(labeled[label], errors="coerce")
+        return "r2", float(r2_score(target, np.asarray(model.predict(features), dtype=float)))
+    predictions = pd.Series(np.asarray(model.predict(features))).map(category_text)
+    truth = labeled[label].map(category_text).to_numpy()
+    return "accuracy", float(np.mean(predictions.to_numpy() == truth))
+
+
 def _performance(
     root: Path, passport: Passport, batch: Any, label: str, tolerance: float
 ) -> dict[str, Any] | None:
-    """Accuracy on a labeled batch versus the passport's test accuracy."""
+    """Live accuracy (or R²) on a labeled batch versus the passport's test score."""
     model_info = passport.model
     if model_info is None or label not in batch.columns:
         return None
@@ -88,18 +103,20 @@ def _performance(
     except UnsafeArtifactError as exc:
         return {"error": str(exc)}
     labeled = batch.dropna(subset=[label])
+    if labeled.empty:
+        return None
     try:
-        predictions = np.asarray(model.predict(labeled.drop(columns=[label]))).astype(str)
+        metric, score = _live_score(model, labeled, label)
     except Exception as exc:  # noqa: BLE001 - any model error must not crash monitoring
         return {"error": f"prediction failed: {exc}"}
-    accuracy = float(np.mean(predictions == labeled[label].astype(str).to_numpy()))
-    baseline = passport.metrics.get("test", {}).get("accuracy")
-    degraded = baseline is not None and accuracy < baseline - tolerance
+    baseline = passport.metrics.get("test", {}).get(metric)
+    degraded = baseline is not None and score < baseline - tolerance
     return {
         "label": label,
         "rows": len(labeled),
-        "accuracy": round(accuracy, 4),
-        "baseline_accuracy": baseline,
+        "metric": metric,
+        metric: round(score, 4),
+        f"baseline_{metric}": baseline,
         "tolerance": tolerance,
         "degraded": degraded,
     }

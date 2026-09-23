@@ -22,29 +22,38 @@ tracking:
   dvc: false
 
 stages:
+  # These stages work on any tabular dataset: point `input` at your file and set `label`.
   - name: preprocess
     cmd: python demo/preprocess.py
     params:
-      drop_identifiers: true
-      generalize: true
+      input: data/raw.csv
+      label: income
+      drop_identifiers: true      # drop columns the PII scan flags as direct identifiers
+      generalize: true            # bucket numeric quasi-identifiers, mask code suffixes
+      quasi_identifiers: auto     # or a list, e.g. [age, zip, gender]
       test_size: 0.25
       seed: 7
     deps: [data/raw.csv]
-    outs: [data/train.csv, data/test.csv]
+    outs: [data/train.csv, data/test.csv, data/preprocess.json]
 
   - name: train
     cmd: python demo/train.py
     params:
-      model: regularized     # "overfit" for the unsafe demo variant
+      label: income
+      model: auto                 # auto | linear | boosting | forest | overfit (unsafe demo)
       cv_folds: 5
+      max_gap: 0.05               # reject candidates that overfit more than this
+      search: full                # full | quick
       seed: 7
-    deps: [data/train.csv]
-    outs: [models/model.pkl, models/model_info.json, models/cv_metrics.json]
+    deps: [data/train.csv, data/preprocess.json]
+    outs: [models/model.pkl, models/model_info.json, models/cv_metrics.json, models/selection.json]
     metrics: models/cv_metrics.json
 
   - name: evaluate
     cmd: python demo/evaluate.py
-    deps: [models/model.pkl, data/train.csv, data/test.csv]
+    params:
+      label: income
+    deps: [models/model.pkl, models/model_info.json, data/train.csv, data/test.csv]
     outs: [models/metrics.json]
     metrics: models/metrics.json
 

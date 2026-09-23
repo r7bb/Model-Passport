@@ -4,6 +4,10 @@ Numeric features use Kolmogorov-Smirnov, Mann-Whitney U, and Cramér-von Mises t
 categorical features use a chi-square test of homogeneity. Significance alone flags trivial
 shifts on large batches, so a feature is *drifted* only when the tests reject (Bonferroni
 corrected across features) **and** the population stability index shows a material effect.
+
+Column types come from the same inference the trainer uses: numbers stored as text are compared
+as numbers, dates as days, and identifier or free-text columns are skipped. Categories outside
+the reference's most common ones are pooled, so a long tail cannot inflate the PSI.
 """
 
 from __future__ import annotations
@@ -15,11 +19,15 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from model_passport.ml.features import Role, column_role, datetime_days, numeric_values
+
 DEFAULT_ALPHA = 0.01
 DEFAULT_PSI_THRESHOLD = 0.1  # 0.1-0.25 moderate shift, > 0.25 major shift
 PSI_BINS = 10
 NULL_RATE_TOLERANCE = 0.1
 EPS = 1e-6
+MAX_CATEGORIES = 20  # reference categories kept as-is; the rest are pooled as OTHER
+OTHER = "__other__"
 
 
 @dataclass
@@ -133,13 +141,54 @@ def check_schema(reference: pd.DataFrame, batch: pd.DataFrame, columns: list[str
     for column in columns:
         if column not in batch.columns:
             continue
-        ref_numeric = pd.api.types.is_numeric_dtype(reference[column])
-        if ref_numeric and not pd.api.types.is_numeric_dtype(batch[column]):
+        ref_numeric = column_role(column, reference[column]) is Role.NUMERIC
+        batch_values = batch[column].dropna()
+        parse_rate = numeric_values(batch_values).notna().mean() if len(batch_values) else 1.0
+        if ref_numeric and parse_rate < 0.95:
             check.type_mismatches.append(column)
         increase = float(batch[column].isna().mean() - reference[column].isna().mean())
         if increase > NULL_RATE_TOLERANCE:
             check.null_rate_increases[column] = round(increase, 4)
     return check
+
+
+def _pool(reference: pd.Series, batch: pd.Series) -> tuple[pd.Series, pd.Series]:
+    keep = set(reference.value_counts().index[:MAX_CATEGORIES])
+    return (
+        reference.where(reference.isin(keep), OTHER),
+        batch.where(batch.isin(keep), OTHER),
+    )
+
+
+def _compare(column: str, reference: pd.Series, batch: pd.Series) -> FeatureDrift | None:
+    """Tests and PSI for one column, or None when the column cannot be compared."""
+    role = column_role(column, reference)
+    if not isinstance(role, Role) and role not in {"constant"}:
+        return None  # identifiers, free text, and empty columns carry no distribution
+    if role is Role.DATETIME:
+        ref, cur = datetime_days(reference).dropna(), datetime_days(batch).dropna()
+    elif role is Role.NUMERIC or (role == "constant" and pd.api.types.is_numeric_dtype(reference)):
+        ref, cur = numeric_values(reference).dropna(), numeric_values(batch).dropna()
+    else:
+        ref, cur = _pool(reference.dropna().astype(str), batch.dropna().astype(str))
+        unseen = len(set(batch.dropna().astype(str)) - set(reference.dropna().astype(str)))
+        if ref.empty or cur.empty:
+            return None
+        return _feature(column, "categorical", _chi_square(ref, cur), psi_categorical(ref, cur),
+                        unseen)  # fmt: skip
+    if ref.empty or cur.empty:
+        return None
+    ref_values, cur_values = ref.to_numpy(float), cur.to_numpy(float)
+    tests = _numeric_tests(ref_values, cur_values)
+    kind = "datetime" if role is Role.DATETIME else "numeric"
+    return _feature(column, kind, tests, psi_numeric(ref_values, cur_values), 0)
+
+
+def _feature(
+    column: str, kind: str, tests: dict[str, dict[str, float]], psi: float, unseen: int
+) -> FeatureDrift:
+    # ``drifted`` is decided by check_drift once the corrected alpha is known.
+    return FeatureDrift(column, kind, round(psi, 6), tests, 0, False, unseen)
 
 
 def check_drift(
@@ -154,36 +203,13 @@ def check_drift(
     columns = [c for c in (features or list(reference.columns)) if c not in excluded]
     schema = check_schema(reference, batch, columns)
     testable = [c for c in columns if c in batch.columns and c not in schema.type_mismatches]
-    corrected_alpha = alpha / max(len(testable), 1)
-
-    results = []
-    for column in testable:
-        ref, cur = reference[column].dropna(), batch[column].dropna()
-        if ref.empty or cur.empty:
-            continue
-        if pd.api.types.is_numeric_dtype(ref):
-            ref_values, cur_values = ref.to_numpy(float), cur.to_numpy(float)
-            tests = _numeric_tests(ref_values, cur_values)
-            psi = psi_numeric(ref_values, cur_values)
-            kind, unseen = "numeric", 0
-        else:
-            ref, cur = ref.astype(str), cur.astype(str)
-            tests = _chi_square(ref, cur)
-            psi = psi_categorical(ref, cur)
-            kind, unseen = "categorical", len(set(cur) - set(ref))
-        rejected = sum(t["p_value"] < corrected_alpha for t in tests.values())
-        majority = rejected * 2 > len(tests)
-        results.append(
-            FeatureDrift(
-                feature=column,
-                kind=kind,
-                psi=round(psi, 6),
-                tests=tests,
-                rejected=rejected,
-                drifted=majority and psi >= psi_threshold,
-                unseen_categories=unseen,
-            )
-        )
+    compared = [_compare(str(c), reference[c], batch[c]) for c in testable]
+    results = [r for r in compared if r is not None]
+    corrected_alpha = alpha / max(len(results), 1)
+    for result in results:
+        result.rejected = sum(t["p_value"] < corrected_alpha for t in result.tests.values())
+        majority = result.rejected * 2 > len(result.tests)
+        result.drifted = majority and result.psi >= psi_threshold
     return DriftReport(
         rows=len(batch),
         reference_rows=len(reference),
