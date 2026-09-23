@@ -35,10 +35,12 @@ stages:
   - name: train
     cmd: python demo/train.py
     params:
-      model: regularized
+      model: regularized     # "overfit" for the unsafe demo variant
+      cv_folds: 5
       seed: 7
     deps: [data/train.csv]
-    outs: [models/model.pkl, models/model_info.json]
+    outs: [models/model.pkl, models/model_info.json, models/cv_metrics.json]
+    metrics: models/cv_metrics.json
 
   - name: evaluate
     cmd: python demo/evaluate.py
