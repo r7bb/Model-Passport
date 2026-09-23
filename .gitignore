@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Secrets: never commit signing keys or env files
+.passport/
+*.pem
+.env
+.env.*
+
+# Local data and artifacts
+data/
+models/
+mlruns/
