@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 
 from model_passport.core import identity
-from model_passport.core.assess import AssessmentError, assess_privacy, scan_secrets
+from model_passport.core.assess import (
+    AssessmentError,
+    assess_models,
+    assess_privacy,
+    scan_secrets,
+)
 from model_passport.core.capture import (
     RunRecord,
     capture_environment,
@@ -125,15 +130,11 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
         except PolicyError as exc:
             raise BuildError(str(exc)) from exc
 
-    try:
-        privacy_report = assess_privacy(root, config.privacy, datasets)
-    except AssessmentError as exc:
-        raise BuildError(str(exc)) from exc
-    security_report = SecurityReport()
-    if config.privacy.scan_secrets:
-        scanned, secret_findings = scan_secrets(root, manifest.sorted())
-        security_report.files_scanned_for_secrets = scanned
-        security_report.secret_findings = secret_findings
+    model_fields = inputs.model.model_dump(exclude={"path", "metadata"}, exclude_defaults=True)
+    if inputs.model.metadata is not None:
+        manifest.add(inputs.model.metadata, ArtifactKind.OTHER)
+        declared_meta = json.loads((root / inputs.model.metadata).read_text(encoding="utf-8"))
+        model_fields = {**declared_meta, **model_fields}
 
     private_key_path = root / config.signing.private_key
     if not private_key_path.is_file():
@@ -142,17 +143,32 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
         )
     private_key = identity.load_private_key(private_key_path)
 
+    artifacts = manifest.sorted()
+    environment = run.environment if run else capture_environment()
+    security_report = SecurityReport()
+    try:
+        privacy_report = assess_privacy(root, config.privacy, datasets)
+        privacy_report.leakage = assess_models(
+            root,
+            config.audit,
+            model_ref.path,
+            artifacts,
+            datasets,
+            environment,
+            security_report,
+            input_schema=model_fields.get("input_schema"),
+        )
+    except AssessmentError as exc:
+        raise BuildError(str(exc)) from exc
+    if config.privacy.scan_secrets:
+        scanned, secret_findings = scan_secrets(root, artifacts)
+        security_report.files_scanned_for_secrets = scanned
+        security_report.secret_findings = secret_findings
+
     metrics = {split: dict(values) for split, values in (run.metrics if run else {}).items()}
     for split, values in inputs.metrics.items():
         metrics.setdefault(split, {}).update(values)
 
-    model_fields = inputs.model.model_dump(exclude={"path", "metadata"}, exclude_defaults=True)
-    if inputs.model.metadata is not None:
-        manifest.add(inputs.model.metadata, ArtifactKind.OTHER)
-        declared_meta = json.loads((root / inputs.model.metadata).read_text(encoding="utf-8"))
-        model_fields = {**declared_meta, **model_fields}
-
-    artifacts = manifest.sorted()
     passport = Passport(
         identity=Identity(
             model_name=config.project.name,
@@ -177,7 +193,7 @@ def build_passport(config_path: Path, config: ProjectConfig | None = None) -> Pa
             if run
             else None
         ),
-        environment=run.environment if run else capture_environment(),
+        environment=environment,
         metrics=metrics,
         privacy_report=privacy_report,
         security_report=security_report,

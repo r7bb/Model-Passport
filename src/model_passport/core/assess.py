@@ -4,9 +4,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from model_passport.core.config import PrivacyConfig
-from model_passport.core.schema import ArtifactKind, ArtifactRef, DatasetInfo, PrivacyReport
-from model_passport.scanners.base import ScanError, ScanTarget
+from model_passport.auditors.artifact import (
+    UnsafeArtifactError,
+    audit_dependencies,
+    is_pickle_like,
+    safe_load_pickle,
+    scan_model_file,
+)
+from model_passport.auditors.leakage import LeakageAuditError, loss_threshold_attack
+from model_passport.core.config import AuditConfig, PrivacyConfig
+from model_passport.core.schema import (
+    ArtifactKind,
+    ArtifactRef,
+    DatasetInfo,
+    Environment,
+    Finding,
+    LeakageResult,
+    PrivacyReport,
+    SecurityReport,
+    Severity,
+    SplitRole,
+)
+from model_passport.scanners.base import ScanError, ScanTarget, load_table, string_columns
 from model_passport.scanners.data_pii import PiiScanner
 from model_passport.scanners.reid_risk import ReidRiskScanner
 from model_passport.scanners.secrets import SecretsScanner
@@ -40,6 +59,68 @@ def assess_privacy(
         report.datasets_scanned.append(info.name)
     report.reidentification = reid.results
     return report
+
+
+def _dataset_path(
+    explicit: Path | None, datasets: list[tuple[str, DatasetInfo]], role: SplitRole
+) -> str | None:
+    if explicit is not None:
+        return str(explicit)
+    return next((path for path, info in datasets if info.split_role is role), None)
+
+
+def assess_models(
+    root: Path,
+    config: AuditConfig,
+    model_path: str,
+    artifacts: list[ArtifactRef],
+    datasets: list[tuple[str, DatasetInfo]],
+    environment: Environment | None,
+    report: SecurityReport,
+    input_schema: dict[str, str] | None = None,
+) -> LeakageResult | None:
+    """Artifact scan, dependency audit (into ``report``), and leakage audit (returned)."""
+    if config.scan_artifacts:
+        for artifact in artifacts:
+            if artifact.kind is ArtifactKind.MODEL or is_pickle_like(Path(artifact.path)):
+                report.artifact_findings.extend(
+                    scan_model_file(root / artifact.path, label=artifact.path)
+                )
+                report.artifacts_scanned.append(artifact.path)
+
+    if config.dependency_audit and environment is not None:
+        status, message, vulns = audit_dependencies(environment.dependencies)
+        report.dependency_audit = status
+        report.dependency_audit_message = message
+        report.dependency_vulnerabilities = vulns
+
+    if not config.label_column:
+        return None
+    members = _dataset_path(config.members, datasets, SplitRole.TRAIN)
+    nonmembers = _dataset_path(config.nonmembers, datasets, SplitRole.TEST)
+    if members is None or nonmembers is None:
+        raise AssessmentError("leakage audit needs member (train) and non-member (test) data")
+    try:
+        model = safe_load_pickle(root / model_path)
+    except UnsafeArtifactError as exc:
+        report.artifact_findings.append(
+            Finding(
+                scanner="leakage", category="AUDIT_SKIPPED", severity=Severity.HIGH,
+                location=model_path, message=str(exc),
+            )
+        )  # fmt: skip
+        return None
+    text_cols = string_columns(input_schema)
+    try:
+        return loss_threshold_attack(
+            model,
+            load_table(root / members, text_cols),
+            load_table(root / nonmembers, text_cols),
+            config.label_column,
+            gap_metric=config.gap_metric,
+        )
+    except (LeakageAuditError, ScanError) as exc:
+        raise AssessmentError(f"leakage audit failed: {exc}") from exc
 
 
 def scan_secrets(root: Path, artifacts: list[ArtifactRef]) -> tuple[int, list]:

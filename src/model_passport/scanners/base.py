@@ -18,21 +18,40 @@ class ScanError(Exception):
     """Raised when a target cannot be read or scanned."""
 
 
-def load_table(path: Path) -> pd.DataFrame:
-    """Load a CSV, TSV, Parquet, or JSONL file."""
+STRING_DTYPES = {"object", "str", "string"}
+
+
+def string_columns(schema: dict[str, str] | None) -> list[str]:
+    """Columns a model schema declares as strings (e.g. ZIP codes with leading zeros)."""
+    return [col for col, dtype in (schema or {}).items() if str(dtype).lower() in STRING_DTYPES]
+
+
+def load_table(path: Path, string_cols: list[str] | None = None) -> pd.DataFrame:
+    """Load a CSV, TSV, Parquet, or JSONL file.
+
+    ``string_cols`` are read as text so type inference cannot corrupt them (``"02103"`` must not
+    become ``2103``). Pass the columns a model was trained on as strings.
+    """
     suffix = path.suffix.lower()
+    as_text = dict.fromkeys(string_cols or [], str)
     try:
-        if suffix == ".csv":
-            return pd.read_csv(path, low_memory=False)
-        if suffix == ".tsv":
-            return pd.read_csv(path, sep="\t", low_memory=False)
+        if suffix in {".csv", ".tsv"}:
+            sep = "\t" if suffix == ".tsv" else ","
+            header = pd.read_csv(path, sep=sep, nrows=0).columns
+            dtype = {c: t for c, t in as_text.items() if c in header}
+            return pd.read_csv(path, sep=sep, low_memory=False, dtype=dtype or None)
         if suffix in {".parquet", ".pq"}:
-            return pd.read_parquet(path)
-        if suffix in {".jsonl", ".ndjson"}:
-            return pd.read_json(path, lines=True)
+            frame = pd.read_parquet(path)
+        elif suffix in {".jsonl", ".ndjson"}:
+            frame = pd.read_json(path, lines=True, dtype=False)
+        else:
+            raise ScanError(f"unsupported table format {suffix!r} for {path}")
     except (OSError, ValueError, ImportError) as exc:
         raise ScanError(f"cannot read {path}: {exc}") from exc
-    raise ScanError(f"unsupported table format {suffix!r} for {path}")
+    for column in as_text:
+        if column in frame.columns:
+            frame[column] = frame[column].where(frame[column].isna(), frame[column].astype(str))
+    return frame
 
 
 @dataclass

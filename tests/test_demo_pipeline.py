@@ -72,6 +72,21 @@ def test_injected_pii_fails_and_cleaned_data_passes(demo_project: Path) -> None:
     assert safe["secrets_found_max"] == "pass"
 
 
+def _leakage(out: Path) -> dict:
+    import json
+
+    return json.loads(out.read_text())["privacy_report"]["leakage"]
+
+
+def test_overfit_model_has_higher_attack_auc(demo_project: Path) -> None:
+    overfit = _leakage(run_demo(demo_project, {"train": {"model": "overfit"}}))
+    regular = _leakage(run_demo(demo_project))
+    assert overfit["mia_auc"] > 0.8
+    assert regular["mia_auc"] < 0.6
+    assert overfit["mia_auc"] > regular["mia_auc"]
+    assert overfit["generalization_gap"] > regular["generalization_gap"]
+
+
 def test_demo_passport_has_three_stages(demo_project: Path) -> None:
     import json
 
