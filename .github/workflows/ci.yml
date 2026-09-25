@@ -125,7 +125,7 @@ jobs:
       - name: Create an env file for CI only
         run: |
           cp .env.example .env
-          sed -i "s/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)/" .env
+          sed -i "s/^S3_SECRET_KEY=.*/S3_SECRET_KEY=$(openssl rand -hex 24)/" .env
       - run: docker compose config --quiet
       - run: docker compose build
       - name: Start the stack
@@ -149,7 +149,7 @@ jobs:
           check registry http://localhost:8000/health
           check mlflow http://localhost:5000/health
           check dashboard http://localhost:8501/_stcore/health
-          test "$(docker compose ps -a --format '{{.ExitCode}}' minio-init)" = "0"
+          test "$(docker compose ps -a --format '{{.ExitCode}}' objectstore-init)" = "0"
       - name: Report container state and logs as annotations
         if: failure()
         run: |

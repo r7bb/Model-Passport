@@ -304,7 +304,7 @@ To require a password (bearer token) for uploads, set `PASSPORT_REGISTRY_TOKEN` 
 
 ## 6. Run everything with Docker
 
-Docker starts the dashboard, the registry, MLflow, and MinIO (file storage for MLflow) together, with nothing else to install:
+Docker starts the dashboard, the registry, MLflow, and SeaweedFS (S3-compatible file storage for MLflow) together, with nothing else to install:
 
 ```bash
 cp .env.example .env        # then open .env and replace every password
@@ -316,7 +316,7 @@ docker compose up -d --build
 | Dashboard | http://localhost:8501 |
 | Registry API | http://localhost:8000/docs |
 | MLflow | http://localhost:5000 |
-| MinIO console | http://localhost:9001 |
+| Object store (S3 API) | http://localhost:8333 |
 
 To log runs to MLflow, set `tracking.mlflow_uri: http://localhost:5000` in `passport.yaml`. Stop everything with `docker compose down`.
 
