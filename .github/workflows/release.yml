@@ -1,0 +1,89 @@
+# Release: push a tag like v0.2.0 (matching model_passport.__version__) to publish
+#   - the package to PyPI (trusted publishing; no token stored in the repository),
+#   - the Docker image to ghcr.io/r7bb/model-passport,
+#   - a GitHub release with the built files.
+# One-time setup is described in SETUP.md under "Releasing".
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+      - name: Tag matches the package version
+        id: version
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+)\"', open('src/model_passport/__init__.py').read())[1])")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "::error::tag $GITHUB_REF_NAME != v$version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: Smoke-test the wheel
+        run: |
+          python -m venv /tmp/user && /tmp/user/bin/pip install "$(ls dist/*.whl)"
+          /tmp/user/bin/passport --version
+      - uses: actions/upload-artifact@v5
+        with: { name: dist, path: dist/ }
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v5
+        with: { name: dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/r7bb/model-passport:${{ needs.build.outputs.version }}
+            ghcr.io/r7bb/model-passport:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/r7bb/Model-Passport
+            org.opencontainers.image.licenses=MIT
+
+  github-release:
+    needs: [build, pypi, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with: { name: dist, path: dist/ }
+      - name: Create the release from the changelog section
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          awk -v v="## $VERSION" '$0 ~ "^"v {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Model Passport $VERSION" --notes-file notes.md

@@ -386,3 +386,83 @@ def test_stages_exit_with_a_readable_message(
     monkeypatch.delenv("PASSPORT_PARAMS")
     with pytest.raises(SystemExit, match="set `label`"):
         stages.run("train")
+
+
+# --- Adaptive k-anonymity -------------------------------------------------------------------
+
+
+def _people(n: int, seed: int = 0) -> pd.DataFrame:
+    """Four quasi-identifiers; only age and marital status predict the label."""
+    rng = np.random.default_rng(seed)
+    age = rng.integers(18, 80, n)
+    prefixes = ["021", "100", "303", "606", "941"]
+    marital = rng.choice(
+        ["married", "single", "divorced", "widowed"], n, p=[0.45, 0.35, 0.15, 0.05]
+    )
+    signal = 0.06 * (age - 45) + 1.2 * (marital == "married") + rng.normal(0, 1, n)
+    return pd.DataFrame(
+        {
+            "age": age,
+            "gender": rng.choice(["F", "M"], n),
+            "zip": [f"{p}{rng.integers(10, 99)}" for p in rng.choice(prefixes, n)],
+            "marital_status": marital,
+            "hours": rng.normal(40, 8, n).round(),
+            "label": np.where(signal > 0.5, "yes", "no"),
+        }
+    )
+
+
+def test_generalization_coarsens_identifying_columns_before_predictive_ones() -> None:
+    from model_passport.ml.privacy import at_risk
+
+    frame = _people(800)
+    qi = ["age", "gender", "zip", "marital_status"]
+    rules = fit_generalization(frame, qi, target_k=20, label=frame["label"])
+    out = apply_generalization(frame, rules)
+    assert at_risk(out, qi, 20) <= 0.01 * len(frame)
+    # zip carries no information about the label, so it gives way; age predicts the label
+    # and keeps several ranges.
+    assert out["zip"].nunique() == 1
+    assert rules["age"]["kind"] == "range"
+    assert out["age"].nunique() >= 2
+
+
+def test_preprocess_reaches_k_anonymity_in_both_files_on_small_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from model_passport.ml import stages
+    from model_passport.scanners.reid_risk import k_anonymity
+
+    monkeypatch.chdir(tmp_path)
+    Path("data").mkdir()
+    _people(600).to_csv("data/raw.csv", index=False)
+    monkeypatch.setenv("PASSPORT_PARAMS", json.dumps({"label": "label"}))
+    stages.run("preprocess")
+    manifest = json.loads(Path("data/preprocess.json").read_text())
+    qi = manifest["quasi_identifiers"]
+    assert set(qi) == {"age", "gender", "zip", "marital_status"}
+    removed = sum(manifest["k_anonymity"]["suppressed"].values())
+    assert removed <= 0.05 * 600  # anonymity comes from coarsening, not from deleting people
+    for name in ("train", "test"):
+        part = read_table(Path(f"data/{name}.csv"))
+        assert k_anonymity(part, qi) >= 5
+
+
+def test_generalization_without_a_target_keeps_the_initial_buckets() -> None:
+    frame = _people(300)
+    rules = fit_generalization(frame, ["age", "zip", "gender"])
+    assert rules["age"]["width"] == 10
+    assert rules["zip"] == {"kind": "prefix", "keep": 3}
+    assert "gender" not in rules
+
+
+def test_suppress_small_groups_and_pooling() -> None:
+    from model_passport.ml.privacy import pool_label, suppress_small_groups
+
+    frame = pd.DataFrame({"a": ["x"] * 6 + ["y"] * 2, "b": [1] * 8})
+    kept, removed = suppress_small_groups(frame, ["a", "b"], k=5)
+    assert (len(kept), removed) == (6, 2)
+    assert pool_label("rare", {"common"}) == "other"
+    assert pool_label("common", {"common"}) == "common"

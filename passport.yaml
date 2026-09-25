@@ -30,7 +30,7 @@ stages:
       label: income
       drop_identifiers: true      # drop columns the PII scan flags as direct identifiers
       generalize: true            # bucket numeric quasi-identifiers, mask code suffixes
-      quasi_identifiers: auto     # or a list, e.g. [age, zip, gender]
+      quasi_identifiers: [age, zip, gender]  # same columns the privacy scan checks below
       test_size: 0.25
       seed: 7
     deps: [data/raw.csv]

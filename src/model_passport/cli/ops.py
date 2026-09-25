@@ -1,14 +1,19 @@
-"""Operations commands: prepare (new batches), monitor (drift), serve (registry), push."""
+"""Operations commands: prepare, monitor, dashboard, serve (registry), push (upload)."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
+import subprocess
+import sys
+from importlib.resources import files
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from model_passport.cli._app import EXIT_FAIL, app, fail, warn
+from model_passport.cli._app import EXIT_FAIL, INSPECT, NEW_DATA, SHARE, app, fail, warn
 from model_passport.core import identity
 from model_passport.core.config import SigningConfig
 from model_passport.ml.stages import prepare_batch
@@ -24,7 +29,7 @@ from model_passport.monitoring.monitor import (
 from model_passport.registry.client import RegistryClient, RegistryError
 
 monitor_app = typer.Typer(help="Monitor deployed models.", no_args_is_help=True)
-app.add_typer(monitor_app, name="monitor")
+app.add_typer(monitor_app, name="monitor", rich_help_panel=NEW_DATA)
 
 RegistryOption = Annotated[
     str | None, typer.Option(help="Registry URL (default: $PASSPORT_REGISTRY_URL).")
@@ -67,7 +72,7 @@ def _print_monitor(result: MonitorResult) -> None:
     typer.echo("retraining recommended" if result.retrain_recommended else "no retraining needed")
 
 
-@app.command()
+@app.command(rich_help_panel=NEW_DATA)
 def prepare(
     batch: Annotated[Path, typer.Argument(help="Raw batch (CSV, TSV, Parquet, or JSONL).")],
     out: Annotated[
@@ -138,7 +143,38 @@ def monitor_drift(
         raise typer.Exit(EXIT_FAIL)
 
 
-@app.command()
+@app.command(rich_help_panel=INSPECT)
+def dashboard(
+    project: Annotated[Path, typer.Argument(help="Project directory with passport.json.")] = Path(),
+    registry: RegistryOption = None,
+    host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port.")] = 8501,
+    browser: Annotated[
+        bool, typer.Option("--browser/--no-browser", help="Open a browser tab.")
+    ] = True,
+) -> None:
+    """Open the dashboard for a project's passports, or for a registry."""
+    if importlib.util.find_spec("streamlit") is None:
+        fail("the dashboard needs Streamlit: pip install 'model-passport[dashboard]'")
+    env = {**os.environ, "PASSPORT_PROJECT_DIR": str(project.resolve())}
+    if registry:
+        env["PASSPORT_REGISTRY_URL"] = registry
+    app_file = files("model_passport.dashboard").joinpath("app.py")
+    command = [
+        sys.executable, "-m", "streamlit", "run", str(app_file),
+        "--server.address", host, "--server.port", str(port),
+        "--server.headless", "false" if browser else "true",
+        "--browser.gatherUsageStats", "false",
+    ]  # fmt: skip
+    typer.echo(f"dashboard: http://{host}:{port} (Ctrl+C to stop)")
+    try:
+        code = subprocess.run(command, env=env, check=False).returncode
+    except KeyboardInterrupt:
+        code = 0
+    raise typer.Exit(code)
+
+
+@app.command(rich_help_panel=SHARE)
 def push(
     passport: Annotated[Path, typer.Argument(help="Passport JSON file.")] = Path("passport.json"),
     public_key: Annotated[Path, typer.Option(help="Public key that signed it.")] = Path(
@@ -164,7 +200,7 @@ def push(
     )
 
 
-@app.command()
+@app.command(rich_help_panel=SHARE)
 def serve(
     host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port.")] = 8000,

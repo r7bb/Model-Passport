@@ -87,7 +87,9 @@ def test_demo_passport_records_pipeline_and_metrics(demo_project: Path) -> None:
     assert cv["accuracy_gap"] <= 0.05
     selection = json.loads((demo_project / "models/selection.json").read_text())
     assert selection["leaderboard"][0]["family"] == "linear"
-    assert set(selection["features"]["dropped"]) == set()  # identifiers already removed
+    # Identifiers are removed before training; only quasi-identifiers blanked for anonymity
+    # (now constant) may be left unused.
+    assert set(selection["features"]["dropped"]) <= {"age", "zip", "gender"}
     assert verify_passport(
         demo_project / "passport.json", demo_project / ".passport/signing_key.pub", demo_project
     ).ok

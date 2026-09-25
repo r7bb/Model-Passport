@@ -1,0 +1,143 @@
+# Model Passport as a reusable GitHub Action.
+#
+#   - uses: r7bb/Model-Passport@v0.2.0
+#     with:
+#       signing-key: ${{ secrets.PASSPORT_SIGNING_KEY }}
+#
+# Runs the pipeline in passport.yaml, builds and verifies the signed passport, uploads it as a
+# workflow artifact, and fails the job when the policy verdict is fail.
+name: Model Passport
+description: Build and verify a signed passport for an ML model; fail the job on a failing verdict.
+author: Rohit Biju
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  command:
+    description: "build (run the pipeline, build, verify), build-only (build and verify), or verify"
+    default: build
+  working-directory:
+    description: Project directory containing passport.yaml.
+    default: "."
+  python-version:
+    description: Python version to install.
+    default: "3.11"
+  extras:
+    description: Optional extras to install, comma separated (for example demo,mlflow).
+    default: ""
+  signing-key:
+    description: >-
+      PEM Ed25519 private key, stored as a secret. Empty generates a throwaway key for this run,
+      which is fine for pull-request checks but not for passports you publish.
+    default: ""
+  key-passphrase:
+    description: Passphrase of an encrypted signing key.
+    default: ""
+  passport:
+    description: Passport file to build or verify.
+    default: passport.json
+  upload-artifact:
+    description: Upload the passport, its HTML report, and archived versions as an artifact.
+    default: "true"
+
+outputs:
+  verdict:
+    description: Policy verdict (pass, warn, or fail).
+    value: ${{ steps.summary.outputs.verdict }}
+  passport-id:
+    description: ID of the passport that was built or verified.
+    value: ${{ steps.summary.outputs.passport-id }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Model Passport
+      shell: bash
+      env:
+        EXTRAS: ${{ inputs.extras }}
+      run: |
+        spec="${GITHUB_ACTION_PATH}"
+        if [ -n "$EXTRAS" ]; then spec="${spec}[${EXTRAS}]"; fi
+        python -m pip install --disable-pip-version-check "$spec"
+        passport --version
+
+    - name: Signing key
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SIGNING_KEY: ${{ inputs.signing-key }}
+        PASSPORT_KEY_PASSPHRASE: ${{ inputs.key-passphrase }}
+      run: |
+        if [ -n "$SIGNING_KEY" ]; then
+          mkdir -p .passport
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > .passport/signing_key.pem
+        else
+          echo "::warning::No signing-key input; signing with a throwaway key for this run."
+        fi
+        passport init
+
+    - name: Run pipeline
+      if: inputs.command == 'build'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PASSPORT_KEY_PASSPHRASE: ${{ inputs.key-passphrase }}
+      run: passport run
+
+    - name: Build passport
+      if: inputs.command == 'build' || inputs.command == 'build-only'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PASSPORT_KEY_PASSPHRASE: ${{ inputs.key-passphrase }}
+        PASSPORT_FILE: ${{ inputs.passport }}
+      run: passport build --out "$PASSPORT_FILE"
+
+    - name: Verify passport
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PASSPORT_FILE: ${{ inputs.passport }}
+      run: passport verify "$PASSPORT_FILE"
+
+    - name: Summary
+      id: summary
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PASSPORT_FILE: ${{ inputs.passport }}
+      run: |
+        [ -f "$PASSPORT_FILE" ] || exit 0
+        python - <<'PY'
+        import json, os
+        p = json.load(open(os.environ["PASSPORT_FILE"]))
+        verdict = (p.get("policy") or {}).get("verdict") or "none"
+        pid = p["identity"]["passport_id"]
+        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+            out.write(f"verdict={verdict}\npassport-id={pid}\n")
+        rules = (p.get("policy") or {}).get("rules", [])
+        lines = [f"## Model Passport: {verdict.upper()}", "",
+                 f"`{p['identity']['model_name']}` v{p['identity']['version']} · passport `{pid}`",
+                 "", "| Rule | Result | Detail |", "|---|---|---|"]
+        lines += [f"| {r['name']} | {r['result']} | {r['message']} |" for r in rules]
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+            summary.write("\n".join(lines) + "\n")
+        PY
+
+    - name: Upload passport
+      if: always() && inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v5
+      with:
+        name: passport
+        path: |
+          ${{ inputs.working-directory }}/${{ inputs.passport }}
+          ${{ inputs.working-directory }}/passport.html
+          ${{ inputs.working-directory }}/.passport/history/
+        if-no-files-found: ignore

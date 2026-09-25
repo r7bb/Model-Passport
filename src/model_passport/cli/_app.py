@@ -9,6 +9,7 @@ import typer
 import yaml
 from pydantic import ValidationError
 
+from model_passport import __version__
 from model_passport.core.config import CONFIG_FILENAME, ProjectConfig, load_config
 
 app = typer.Typer(
@@ -16,6 +17,28 @@ app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_show_locals=False,
 )
+
+
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(f"model-passport {__version__}")
+        raise typer.Exit
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_show_version, is_eager=True, help="Show the version."),
+    ] = False,
+) -> None:
+    """Signed, verifiable passports for trained ML models."""
+
+
+# Help panels, numbered in workflow order (modules register in this order; see __init__).
+BUILD, INSPECT, NEW_DATA, SHARE, CHECKS = (
+    "1. Build a passport", "2. Inspect", "3. New data", "4. Share", "5. Individual checks",
+)  # fmt: skip
 
 # Exit codes: 0 ok / pass, 1 policy fail / verification fail / drift, 2 usage or input error.
 EXIT_FAIL = 1

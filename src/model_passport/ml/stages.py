@@ -15,6 +15,7 @@ and writes plain files, so each can be replaced by your own script at any time.
 from __future__ import annotations
 
 import json
+import math
 import pickle
 import sys
 from collections.abc import Callable, Mapping
@@ -35,8 +36,9 @@ from model_passport.ml.privacy import (
     detect_identifiers,
     fit_generalization,
     quasi_identifiers,
+    suppress_small_groups,
 )
-from model_passport.ml.task import DataError, Task, clean_rows, infer_task, split
+from model_passport.ml.task import DataError, RowReport, Task, clean_rows, infer_task, split
 from model_passport.runtime import params
 
 Params = Mapping[str, Any]
@@ -53,6 +55,8 @@ PREPROCESS_DEFAULTS: dict[str, Any] = {
     "generalize": True,
     "quasi_identifiers": "auto",  # or a list; "auto" suggests them from column names
     "bucket_width": 10,
+    "min_k": 5,  # every group sharing quasi-identifier values has at least this many records
+    "max_suppression": 0.01,  # share of records that may be removed to reach min_k
     "test_size": 0.25,
     "seed": 7,
 }
@@ -95,6 +99,41 @@ def apply_manifest(frame: pd.DataFrame, manifest: Mapping[str, Any]) -> pd.DataF
     return apply_generalization(frame.drop(columns=dropped), manifest["generalization"])
 
 
+def _split_target(p: Params) -> int:
+    """Group size on the whole table that leaves at least ``min_k`` in the smaller split."""
+    min_k: int = p["min_k"]
+    smaller: float = min(p["test_size"], 1 - p["test_size"])
+    return math.ceil(min_k / smaller)
+
+
+def _split_anonymously(
+    frame: pd.DataFrame, manifest: Mapping[str, Any], task: Task, p: Params
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, int]]:
+    """Split so each quasi-identifier group reaches ``min_k`` in both files.
+
+    Records in groups too small for that are removed first (at most ``max_suppression`` of
+    them, by construction of the rules); each remaining group is then divided between train
+    and test in proportion, and rounding stragglers are removed per file.
+    """
+    qi = manifest["quasi_identifiers"]
+    if not p["generalize"] or not qi:
+        train, test = split(frame, p["label"], task, p["test_size"], p["seed"])
+        return train, test, {"before_split": 0, "train": 0, "test": 0}
+    kept, before = suppress_small_groups(frame, qi, _split_target(p))
+    if kept[p["label"]].nunique() < 2:
+        raise DataError("too few records remain after anonymization; add rows or set min_k lower")
+    groups = kept[qi].astype(str).agg("|".join, axis=1)
+    if task.is_classification:
+        # Also balance the label within each group where there are enough rows to do so.
+        with_label = groups + "|" + kept[p["label"]].astype(str)
+        counts = with_label.map(with_label.value_counts())
+        groups = with_label.where(counts >= 2, groups)
+    train, test = split(kept, p["label"], task, p["test_size"], p["seed"], groups=groups)
+    train, in_train = suppress_small_groups(train, qi, p["min_k"])
+    test, in_test = suppress_small_groups(test, qi, p["min_k"])
+    return train, test, {"before_split": before, "train": in_train, "test": in_test}
+
+
 def build_manifest(raw: pd.DataFrame, p: Params) -> dict[str, Any]:
     """Which identifier columns to drop and how to generalize quasi-identifiers."""
     label = p["label"]
@@ -103,11 +142,24 @@ def build_manifest(raw: pd.DataFrame, p: Params) -> dict[str, Any]:
         found = set(detect_identifiers(raw, keep=[label])) | set(p["identifiers"])
         dropped = [str(c) for c in raw.columns if c in found and c != label]
     rules: dict[str, Any] = {}
+    columns: list[str] = []
     if p["generalize"]:
         kept = raw.drop(columns=dropped)
         columns = quasi_identifiers(kept, p["quasi_identifiers"], exclude=[label])
-        rules = fit_generalization(kept, columns, p["bucket_width"])
-    return {"label": label, "dropped_identifiers": dropped, "generalization": rules}
+        rules = fit_generalization(
+            kept,
+            columns,
+            p["bucket_width"],
+            _split_target(p),
+            p["max_suppression"],
+            label=pd.Series(kept[label]),
+        )
+    return {
+        "label": label,
+        "dropped_identifiers": dropped,
+        "quasi_identifiers": columns,
+        "generalization": rules,
+    }
 
 
 def preprocess(p: Params) -> str:
@@ -118,18 +170,53 @@ def preprocess(p: Params) -> str:
     rows, report = clean_rows(raw, p["label"], task)
     manifest = build_manifest(rows, p)
     frame = apply_manifest(rows, manifest)
-    train, test = split(frame, p["label"], task, p["test_size"], p["seed"])
+    train, test, suppressed = _split_anonymously(frame, manifest, task, p)
     for part, out in ((train, p["train_out"]), (test, p["test_out"])):
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         part.to_csv(out, index=False)
-    _write_json(p["manifest_out"], {**manifest, "task": task.value, "rows": report.describe()})
+    privacy = {"min_k": p["min_k"], "suppressed": suppressed}
+    _write_json(
+        p["manifest_out"],
+        {**manifest, "task": task.value, "rows": report.describe(), "k_anonymity": privacy},
+    )
+    return _preprocess_summary(task, report, manifest, len(train), len(test), suppressed)
+
+
+def _generalized(rules: Mapping[str, Any]) -> str:
+    parts = []
+    for column, rule in sorted(rules.items()):
+        if rule["kind"] == "range":
+            parts.append(f"{column} (ranges of {rule['width']:g})")
+        elif rule["kind"] == "prefix":
+            parts.append(f"{column} (first {rule['keep']} characters)")
+        elif rule["kind"] == "suppress":
+            parts.append(f"{column} (removed: too identifying for this much data)")
+        else:
+            parts.append(f"{column} ({len(rule['keep'])} categories + other)")
+    return ", ".join(parts) or "none"
+
+
+def _preprocess_summary(
+    task: Task,
+    report: RowReport,
+    manifest: Mapping[str, Any],
+    train_rows: int,
+    test_rows: int,
+    suppressed: Mapping[str, int],
+) -> str:
     removed = report.rows_in - report.rows_out
     identifiers = ", ".join(manifest["dropped_identifiers"]) or "none"
-    generalized = ", ".join(sorted(manifest["generalization"])) or "none"
-    return (
-        f"{task.value}: {report.rows_in} rows ({removed} removed), train {len(train)}, "
-        f"test {len(test)}; dropped identifiers: {identifiers}; generalized: {generalized}"
-    )
+    counts = f"train {train_rows}, test {test_rows}"
+    lines = [
+        f"{task.value}: {report.rows_in} rows ({removed} removed), {counts}",
+        f"  dropped identifiers: {identifiers}",
+        f"  generalized: {_generalized(manifest['generalization'])}",
+    ]
+    total = sum(suppressed.values())
+    if total:
+        share = total / max(report.rows_out, 1)
+        lines.append(f"  removed {total} records ({share:.1%}) in groups too small to be anonymous")
+    return "\n".join(lines)
 
 
 # --- train ----------------------------------------------------------------------------------

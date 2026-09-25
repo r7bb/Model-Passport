@@ -1,7 +1,7 @@
 """Model Passport dashboard.
 
-    streamlit run dashboard/app.py                      # reads ./passport.json and history
-    PASSPORT_REGISTRY_URL=http://localhost:8000 streamlit run dashboard/app.py
+    passport dashboard                                   # reads ./passport.json and history
+    passport dashboard --registry http://localhost:8000  # reads a registry
 
 Deep link to a version with ``?passport=<passport_id>``.
 """
@@ -9,6 +9,7 @@ Deep link to a version with ``?passport=<passport_id>``.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +31,6 @@ VERDICT_STYLE = {
 SOURCES = ["Local files", "Registry"]
 TABS = ["Simple view", "Policy", "Pipeline", "Lineage", "Privacy", "Security", "Monitoring",
         "Raw JSON"]  # fmt: skip
-
-st.set_page_config(page_title="Model Passport", page_icon="🛂", layout="wide")
 
 
 def badge(verdict: str | None, size: str = "15px") -> str:
@@ -293,6 +292,7 @@ def monitoring_view(p: Passport) -> None:
 
 
 def main() -> None:
+    st.set_page_config(page_title="Model Passport", page_icon="🛂", layout="wide")
     source = make_source()
     if source is None:
         return
@@ -313,7 +313,7 @@ def main() -> None:
     verification = source.verification(entry.passport_id)
     header(passport, verification)
 
-    views = [
+    views: list[Callable[[], object]] = [
         lambda: simple_view(passport),
         lambda: policy_view(passport),
         lambda: pipeline_view(passport),
@@ -332,4 +332,5 @@ def main() -> None:
         st.sidebar.error(f"Verification failed: {verification}")
 
 
-main()
+if __name__ == "__main__":  # streamlit runs this file as __main__
+    main()

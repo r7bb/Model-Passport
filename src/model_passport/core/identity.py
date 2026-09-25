@@ -121,6 +121,16 @@ def save_keypair(private_key: Ed25519PrivateKey, private_path: Path, public_path
     public_path.write_bytes(public_pem)
 
 
+def write_public_key(private_key: Ed25519PrivateKey, public_path: Path) -> None:
+    """Write the public half of ``private_key`` (e.g. when only the private key was supplied)."""
+    public_path.parent.mkdir(parents=True, exist_ok=True)
+    public_path.write_bytes(
+        private_key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+    )
+
+
 def load_private_key(path: Path) -> Ed25519PrivateKey:
     key = serialization.load_pem_private_key(path.read_bytes(), password=_passphrase())
     if not isinstance(key, Ed25519PrivateKey):

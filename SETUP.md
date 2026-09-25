@@ -34,21 +34,32 @@ Check your Python version. It must print 3.11 or higher:
 python3 --version
 ```
 
-### Download and install
+### Install
+
+To use Model Passport on your own data, install the package:
+
+```bash
+python3 -m venv .venv                 # a private Python environment
+source .venv/bin/activate             # Windows: .venv\Scripts\activate
+pip install "model-passport[dashboard] @ git+https://github.com/r7bb/Model-Passport"
+```
+
+After the first release on PyPI, this becomes `pip install "model-passport[dashboard]"`. A ready-made Docker image will be published at `ghcr.io/r7bb/model-passport`.
+
+To run the demo or change the code, clone the repository instead:
 
 ```bash
 git clone https://github.com/r7bb/Model-Passport.git
 cd Model-Passport
-
-python3 -m venv .venv                 # a private Python environment for this project
-source .venv/bin/activate             # Windows: .venv\Scripts\activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[demo,registry,dashboard]"
 ```
 
 Check that it worked:
 
 ```bash
-passport --help
+passport --version
+passport --help           # commands, grouped by step
 ```
 
 You should see a list of commands. Run `source .venv/bin/activate` again whenever you open a new terminal.
@@ -176,6 +187,8 @@ Settings live in `passport.yaml` under each stage's `params`. The most useful on
 |---|---|---|---|
 | preprocess | `quasi_identifiers` | `auto` | Columns to bucket, or `auto` to guess from column names |
 | preprocess | `identifiers` | `[]` | Extra columns to always drop |
+| preprocess | `min_k` | `5` | Smallest group of people who share the same quasi-identifier values |
+| preprocess | `max_suppression` | `0.01` | Share of records that may be removed to reach `min_k` |
 | preprocess | `task` | `auto` | Force `binary-classification`, `multiclass-classification`, or `regression` |
 | train | `model` | `auto` | Or force one family: `linear`, `boosting`, `forest` |
 | train | `max_gap` | `0.05` | Largest allowed train-validation gap; stops overfit models |
@@ -264,7 +277,7 @@ Tuning options: `--alpha` (significance level, default 0.01), `--psi-threshold` 
 ### Dashboard on your own machine
 
 ```bash
-streamlit run dashboard/app.py
+passport dashboard
 ```
 
 This opens a browser page showing the local `passport.json` and its history. To link to a specific version, add `?passport=<passport_id>` to the address.
@@ -276,7 +289,7 @@ The registry is a small server that keeps passports from many models and re-chec
 ```bash
 passport serve --db registry.db                                   # starts at http://localhost:8000
 passport push passport.json --registry http://localhost:8000      # upload
-PASSPORT_REGISTRY_URL=http://localhost:8000 streamlit run dashboard/app.py
+passport dashboard --registry http://localhost:8000
 ```
 
 Interactive API docs are at http://localhost:8000/docs. The main endpoints:
@@ -311,7 +324,7 @@ To log runs to MLflow, set `tracking.mlflow_uri: http://localhost:5000` in `pass
 
 ## 7. Block unsafe models in CI
 
-Because `passport build` and `passport verify` exit with an error on failure, any CI system can use them as a gate. A minimal GitHub Actions job:
+Use the Model Passport GitHub Action. It runs your pipeline, builds and verifies the passport, and uploads it with its report. The job fails when the verdict is FAIL, and the job summary lists every rule:
 
 ```yaml
 jobs:
@@ -319,17 +332,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
-        with: {python-version: "3.11"}
-      - run: pip install "model-passport @ git+https://github.com/r7bb/Model-Passport"
-      - run: passport scan secrets src
-      - run: passport init              # CI key; use a stored secret key for real releases
-      - run: passport run
-      - run: passport build             # fails the job on a FAIL verdict
-      - run: passport verify passport.json
+      - uses: r7bb/Model-Passport@v0.2.0
+        with:
+          signing-key: ${{ secrets.PASSPORT_SIGNING_KEY }}   # contents of .passport/signing_key.pem
 ```
 
-This repository's own pipeline is in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+| Input | Default | Meaning |
+|---|---|---|
+| `command` | `build` | `build` (run, build, verify), `build-only`, or `verify` |
+| `working-directory` | `.` | Folder with `passport.yaml` |
+| `signing-key` | none | Your private key from a repository secret. Without it, a throwaway key is used, which is fine for pull-request checks. |
+| `key-passphrase` | none | For an encrypted key |
+| `extras` | none | Extra packages, e.g. `mlflow` |
+| `python-version` | `3.11` | |
+| `upload-artifact` | `true` | Upload `passport.json`, `passport.html`, and history |
+
+Outputs: `verdict` and `passport-id`. Other CI systems can run the same commands directly: `passport build` and `passport verify` exit with an error on failure.
 
 ---
 
@@ -386,6 +404,22 @@ binary-classification: chose linear (LogisticRegression), 5-fold CV accuracy 0.8
 
 On the demo data the linear model reaches 82.9% test accuracy. That is almost exactly the best any model could do: the synthetic labels contain random noise, which caps accuracy at about 83%. On data with curved or interacting patterns, gradient boosting wins instead. For example, the tests include a two-moons dataset where it beats the linear model by over 3 points.
 
+### How personal details are protected
+
+Direct identifiers (names, emails, phone numbers, ID numbers, dates of birth) are dropped. Quasi-identifiers such as age, ZIP code, gender, and marital status are harmless alone but can single people out together, so preprocess makes sure every combination is shared by at least `min_k` people in each file:
+
+1. It starts with sensible groups: 10-year age ranges and the first 3 digits of ZIP codes.
+2. If groups are still too small, it coarsens one column at a time: wider ranges, shorter codes, rare categories merged into "other", or, as a last resort, the column blanked. Each step is the one that protects the most people per unit of information lost about what you're predicting. Columns that only identify people give way first, and columns that help predictions keep their detail.
+3. It stops when at most 1% of records are still in small groups, removes those few, and splits the data so every group is divided between train and test in proportion.
+
+The preprocess stage prints what it did, for example:
+
+```
+  generalized: age (ranges of 20), gender (removed: too identifying for this much data), zip (removed: ...)
+```
+
+On an 800-row file with 4 quasi-identifiers, this reaches k-anonymity without removing any records, and test accuracy stays at 82%.
+
 ### How verification works
 
 - **Fingerprints:** every file (config, policy, model, data, scripts, stage inputs and outputs) gets a SHA256 hash. Changing even one byte changes its hash.
@@ -409,12 +443,25 @@ On the demo data the linear model reaches 82.9% test accuracy. That is almost ex
 pip install -e ".[dev,demo,registry,dashboard]"
 pre-commit install                 # runs lint, type checks, and a secrets scan on every commit
 
-pytest                             # 190+ tests, about 92% coverage
+pytest                             # about 200 tests, 92% coverage
 ruff check . && ruff format --check .
 mypy                               # strict mode
 ```
 
 The HTML report is built with a small typed builder ([src/model_passport/report/html.py](src/model_passport/report/html.py)) instead of a template engine. Every value is escaped unless explicitly marked safe.
+
+### Releasing
+
+1. Update `__version__` in `src/model_passport/__init__.py` and add a section to [CHANGELOG.md](CHANGELOG.md).
+2. Push a tag: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The release workflow then builds and checks the package, publishes it to PyPI and the Docker image to `ghcr.io/r7bb/model-passport`, and creates a GitHub release with the changelog notes. It fails early if the tag doesn't match the version.
+
+One-time setup before the first release:
+- On PyPI, add a *pending trusted publisher* for project `model-passport` with owner `r7bb`, repository `Model-Passport`, workflow `release.yml`, and environment `pypi`. No token is stored in GitHub.
+- In the repository settings, create an environment named `pypi` (optionally with required reviewers).
+
+### Screenshots
 
 To regenerate the README images from real runs:
 

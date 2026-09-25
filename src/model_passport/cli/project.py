@@ -10,8 +10,10 @@ import typer
 from pydantic import ValidationError
 
 from model_passport.cli._app import (
+    BUILD,
     DEFAULT_CONFIG,
     EXIT_FAIL,
+    INSPECT,
     ConfigOption,
     app,
     fail,
@@ -127,7 +129,7 @@ def _init_data_project(root: Path, name: str, data: Path, label: str | None, for
         typer.echo("wrote policy.yaml (the pass/fail limits)")
 
 
-@app.command()
+@app.command(rich_help_panel=BUILD)
 def init(
     directory: Annotated[Path, typer.Argument(help="Project directory.")] = Path(),
     name: Annotated[
@@ -162,6 +164,12 @@ def init(
     private_path, public_path = root / signing.private_key, root / signing.public_key
     if private_path.exists() and not force:
         typer.echo(f"kept existing signing key {signing.private_key}")
+        if not public_path.exists():
+            try:
+                identity.write_public_key(identity.load_private_key(private_path), public_path)
+            except (ValueError, TypeError) as exc:
+                fail(f"cannot read {signing.private_key}: {exc}")
+            typer.echo(f"wrote public key {signing.public_key}")
     else:
         identity.save_keypair(identity.generate_keypair(), private_path, public_path)
         typer.echo(f"generated signing key {signing.private_key}")
@@ -186,7 +194,7 @@ def _start_tracker(cfg: ProjectConfig, root: Path) -> MlflowTracker | None:
     return tracker
 
 
-@app.command()
+@app.command(rich_help_panel=BUILD)
 def run(
     config: ConfigOption = DEFAULT_CONFIG,
     set_: Annotated[
@@ -260,7 +268,7 @@ def _print_policy(passport: Passport) -> None:
     typer.echo(f"verdict: {passport.policy.verdict.value.upper()}")
 
 
-@app.command()
+@app.command(rich_help_panel=BUILD)
 def build(
     config: ConfigOption = DEFAULT_CONFIG,
     out: Annotated[Path, typer.Option(help="Output passport path.")] = DEFAULT_PASSPORT,
@@ -309,7 +317,7 @@ def _print_verification(report: VerificationReport) -> None:
     typer.echo(f"events:      {'ok' if not report.event_errors else 'CHAIN BROKEN'}")
 
 
-@app.command()
+@app.command(rich_help_panel=BUILD)
 def verify(
     passport: PassportArgument = DEFAULT_PASSPORT,
     public_key: Annotated[
@@ -332,7 +340,7 @@ def verify(
     typer.echo("VERIFIED")
 
 
-@app.command()
+@app.command(rich_help_panel=INSPECT)
 def report(
     passport: PassportArgument = DEFAULT_PASSPORT,
     out: Annotated[Path | None, typer.Option(help="HTML path (default: next to passport).")] = None,
@@ -352,7 +360,7 @@ def report(
     typer.echo(f"wrote {target}")
 
 
-@app.command()
+@app.command(rich_help_panel=INSPECT)
 def export(
     passport: PassportArgument = DEFAULT_PASSPORT,
     out: Annotated[

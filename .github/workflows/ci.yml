@@ -54,7 +54,7 @@ jobs:
           cache: pip
       - run: pip install -e ".[demo]"
       - name: Scan the repository for committed secrets
-        run: passport scan secrets src demo dashboard passport.yaml policy.yaml
+        run: passport scan secrets src demo passport.yaml policy.yaml action.yml
       - name: Certify, monitor, retrain, re-certify
         run: bash demo/update_cycle.sh
       - name: Verify the final passport
@@ -68,6 +68,54 @@ jobs:
             passport.html
             .passport/history/
           if-no-files-found: ignore
+
+  package:
+    # Build the sdist and wheel, then install the wheel into a clean environment the way a user
+    # would (no editable install, no repository on the path) and use it on a fresh dataset.
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: Wheel contains the dashboard, report stylesheet, and type marker
+        run: |
+          unzip -l dist/*.whl | grep -E "dashboard/app.py|report/style.css|py.typed"
+      - name: Install the wheel and use it on a new dataset
+        run: |
+          python -m venv /tmp/user && . /tmp/user/bin/activate
+          pip install "$(ls dist/*.whl)[demo]"
+          mkdir /tmp/project && cd /tmp/project && git init -q
+          python "$GITHUB_WORKSPACE/demo/make_dataset.py" --rows 800 --out customers.csv
+          passport --version
+          passport init --data customers.csv --label income
+          passport run --set train.search=quick
+          passport build
+          passport verify
+          passport prepare customers.csv
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: dist/
+
+  action:
+    # The reusable GitHub Action (action.yml) on the demo project.
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.11" }
+      - run: pip install numpy pandas faker && python demo/make_dataset.py
+      - id: passport
+        uses: ./
+        with:
+          extras: demo
+          upload-artifact: "false"
+      - run: test "${{ steps.passport.outputs.verdict }}" = "pass"
 
   docker:
     runs-on: ubuntu-latest

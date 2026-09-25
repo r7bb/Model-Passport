@@ -15,7 +15,7 @@ from model_passport.auditors.artifact import (
     scan_model_file,
 )
 from model_passport.auditors.leakage import LeakageAuditError, loss_threshold_attack
-from model_passport.cli._app import EXIT_FAIL, app, fail
+from model_passport.cli._app import CHECKS, EXIT_FAIL, app, fail
 from model_passport.core.capture import capture_environment
 from model_passport.core.schema import DependencyAudit, Finding, Severity, at_least
 from model_passport.scanners.base import ScanError, ScanTarget, load_table
@@ -27,8 +27,8 @@ scan_app = typer.Typer(
     help="Scan data and code for privacy and secret leaks.", no_args_is_help=True
 )
 audit_app = typer.Typer(help="Audit models and dependencies.", no_args_is_help=True)
-app.add_typer(scan_app, name="scan")
-app.add_typer(audit_app, name="audit")
+app.add_typer(scan_app, name="scan", rich_help_panel=CHECKS)
+app.add_typer(audit_app, name="audit", rich_help_panel=CHECKS)
 
 SEVERITY_CHOICES = [s.value for s in Severity]
 OutOption = Annotated[Path | None, typer.Option(help="Write findings as JSON.")]

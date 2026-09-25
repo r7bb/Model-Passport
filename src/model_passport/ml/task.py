@@ -107,9 +107,23 @@ def _strata(label: pd.Series, task: Task) -> pd.Series | None:
 
 
 def split(
-    frame: pd.DataFrame, label: str, task: Task, test_size: float, seed: int
+    frame: pd.DataFrame,
+    label: str,
+    task: Task,
+    test_size: float,
+    seed: int,
+    groups: pd.Series | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Stratified train/test split (by class, or by target quantile for regression)."""
+    """Stratified train/test split (by class, or by target quantile for regression).
+
+    ``groups`` (for example, quasi-identifier combinations) replaces the default strata, so
+    every group is divided between the splits in proportion instead of by chance.
+    """
+    if groups is not None:
+        train, test = train_test_split(
+            frame, test_size=test_size, random_state=seed, stratify=groups
+        )
+        return train, test
     size: float | int = test_size
     if task.is_classification:
         # Every class needs a row on each side; small data with many classes needs a larger test.

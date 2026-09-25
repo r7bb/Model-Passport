@@ -14,7 +14,7 @@ A person's passport says who they are and where they're from, and it's hard to f
 
 The document is digitally signed, so if anyone changes the model or its data afterward, the passport shows it.
 
-![The Model Passport dashboard](docs/images/dashboard-simple-view.png)
+![The Model Passport dashboard](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-simple-view.png)
 
 ## Why it matters
 
@@ -54,29 +54,29 @@ It's been tested on data with messy formats, missing values, rare categories, an
 
 **Unsafe data and a model that memorizes are caught and blocked:**
 
-![A failing safety check](docs/images/cli-build-fail.png)
+![A failing safety check](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/cli-build-fail.png)
 
 **A model file that was changed after signing is named:**
 
-![Tampering detected](docs/images/cli-verify-tamper.png)
+![Tampering detected](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/cli-verify-tamper.png)
 
 **New data that looks different from the training data triggers a retraining alert:**
 
-![Changing data detected](docs/images/cli-monitor-drift.png)
+![Changing data detected](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/cli-monitor-drift.png)
 
 **Every passport also comes as a readable report:**
 
 | Passed | Failed |
 |---|---|
-| ![Passing report](docs/images/report-pass.png) | ![Failing report](docs/images/report-fail.png) |
+| ![Passing report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-pass.png) | ![Failing report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-fail.png) |
 
 **The dashboard shows how a model was built, its privacy results, and how it holds up over time:**
 
 | How it was built | Its version history |
 |---|---|
-| ![Pipeline](docs/images/dashboard-pipeline.png) | ![Lineage](docs/images/dashboard-lineage.png) |
+| ![Pipeline](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-pipeline.png) | ![Lineage](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-lineage.png) |
 | **Privacy results** | **Checks on new data** |
-| ![Privacy](docs/images/dashboard-privacy.png) | ![Monitoring](docs/images/dashboard-monitoring.png) |
+| ![Privacy](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-privacy.png) | ![Monitoring](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-monitoring.png) |
 
 ## Try it
 
@@ -87,12 +87,12 @@ passport init --data customers.csv --label churn
 passport run && passport build
 ```
 
-Step-by-step instructions are in **[SETUP.md](SETUP.md)**: installing, running the demo, using your own data, and troubleshooting.
+Step-by-step instructions are in **[SETUP.md](https://github.com/r7bb/Model-Passport/blob/main/SETUP.md)**: installing, running the demo, using your own data, and troubleshooting.
 
 ## Learn more
 
-- [SETUP.md](SETUP.md): installation, commands, and technical details
-- [ROADMAP.md](ROADMAP.md): what's done and what's next
+- [SETUP.md](https://github.com/r7bb/Model-Passport/blob/main/SETUP.md): installation, commands, and technical details
+- [ROADMAP.md](https://github.com/r7bb/Model-Passport/blob/main/ROADMAP.md): what's done and what's next
 - Model Passport builds on the AIPassport research framework (Kalokyri et al., [arXiv 2506.22358](https://arxiv.org/abs/2506.22358)).
 
-Free to use under the MIT license ([LICENSE](LICENSE)). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the open-source software it uses.
+Free to use under the MIT license ([LICENSE](https://github.com/r7bb/Model-Passport/blob/main/LICENSE)). See [THIRD_PARTY_NOTICES.md](https://github.com/r7bb/Model-Passport/blob/main/THIRD_PARTY_NOTICES.md) for the open-source software it uses.

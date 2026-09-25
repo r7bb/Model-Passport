@@ -4,7 +4,7 @@ Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.223
 
 ## Where things stand
 
-All seven phases are done: 194 tests at 92% coverage, strict ruff and mypy, and green CI (lint, tests on Python 3.11 and 3.12, the full demo lifecycle, and the Docker stack).
+All seven phases are done: 198 tests at 92% coverage, strict ruff and mypy, and green CI (lint, tests on Python 3.11 and 3.12, the full demo lifecycle, and the Docker stack).
 
 | Phase | What it delivers |
 |---|---|
@@ -34,7 +34,7 @@ The passport also adds `artifacts`, `run`, and `revision` sections beyond the v0
 
 In priority order:
 
-1. **Easy install:** publish to PyPI, a ready-made GitHub Action, and a prebuilt Docker image, so nobody needs to clone the repo.
+1. **Easy install (built, waiting to publish):** the package, GitHub Action, and release workflow for PyPI and GHCR are ready and tested in CI. The first release needs the one-time PyPI setup in SETUP.md, then a `v0.2.0` tag.
 2. **Safer model files:** save models with skops or ONNX instead of pickle, which removes the "raw pickle" warning.
 3. **Fairness checks:** accuracy and error rates per group (for example, by gender or age range), with policy limits.
 4. **Explanations:** the features that matter most (permutation importance) shown in the report and dashboard.
