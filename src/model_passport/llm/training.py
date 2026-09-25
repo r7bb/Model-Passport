@@ -55,7 +55,8 @@ def tiny_model(texts: Sequence[str], vocab_size: int = 2000, layers: int = 3, wi
     tokenizer = Tokenizer(models.BPE(unk_token="<unk>"))  # noqa: S106 - a token, not a password
     tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
     tokenizer.decoder = decoders.ByteLevel()
-    trainer = trainers.BpeTrainer(  # type: ignore[no-untyped-call]  # stub lacks annotations
+    bpe_trainer: Any = trainers.BpeTrainer  # its stub has no annotations
+    trainer = bpe_trainer(
         vocab_size=vocab_size,
         special_tokens=["<unk>", "<eos>"],
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
