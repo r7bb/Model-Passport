@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: "3.11" }
-      - run: pip install -e ".[dev,registry]"
+      - run: pip install -e ".[dev,registry,dashboard]"  # mypy checks the dashboard too
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
