@@ -4,7 +4,7 @@ MP (Model Passport) is an entity-level PII leakage auditing and remediation plat
 
 ## Where things stand
 
-The passport engine (phases 1–7) and platform phase A are done: 222 tests at 88% coverage, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Platform phases B–G are next; see the build plan below.
+The passport engine (phases 1–7) and platform phases A and B are done: 226 tests at 88% coverage, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Platform phases C–G are next; see the build plan below.
 
 | Phase | What it delivers |
 |---|---|
@@ -15,6 +15,7 @@ The passport engine (phases 1–7) and platform phase A are done: 222 tests at 8
 | 5. Sharing | Registry API, HTML report, JSON-LD export, Streamlit dashboard, Docker Compose |
 | 6. Monitoring | Signed drift events, schema and live accuracy checks, linked and archived model versions |
 | 7. Any data | `passport init --data --label`, automatic cleaning and typing, several model families chosen by cross-validation under an overfitting limit, regression support, `passport prepare` |
+| B. Remediation | `passport init --llm` projects and `passport llm remediate`: sanitize, retrain, re-audit, and version until the gate passes, escalating from single values to whole types when needed. Every version is a linked, signed passport, with archived training data |
 | A. Entity audit | `passport llm audit`, `sanitize`, `finetune`. The seven EL-MIA methods with the strongest chosen by cross-fitting; Gaussian null (LiRA); FDR control; likelihood × impact risk in CVSS bands; exposure-test confirmation; extraction probing for API models; audit results signed into the passport and its policy gate |
 
 ## Decisions
@@ -44,7 +45,7 @@ Decisions: build all modules; audit open-weight and API models from the start; r
 | Phase | Delivers | Modules |
 |---|---|---|
 | A. Entity audit engine (**done**) | Find sensitive entities in training text. Score each one's memorization with the EL-MIA methods (loss, zlib, min-k%, ReCaLL, and the reference-set attacks). Report per-entity risk with false-discovery control and AUC / TPR at low FPR. Works with Hugging Face models, OpenAI-compatible servers with log-probs, and extraction probing for API-only models. | M5 |
-| B. Remediation | Sanitize risky entities (surrogate, mask, or drop), fine-tune again from the base checkpoint, re-audit, and link the new version to the old one in a signed passport | M6, M7 |
+| B. Remediation (**done**) | Sanitize risky entities (surrogate, mask, or drop), fine-tune again from the base checkpoint, re-audit, and link the new version to the old one in a signed passport | M6, M7 |
 | C. Backend | FastAPI with PostgreSQL: tenants, 7 roles, RBAC, append-only audit log, per-tenant encrypted object storage, job queue and Python workers, provenance and diligence reports | M2, M3, M4, M9 |
 | D. Control plane | Go control plane (orchestration, deploy, rollback, kill switch) over gRPC, API gateway (subdomain → tenant, login check), and the `mp` CLI | M7, M8 |
 | E. Web app | Next.js super-admin console and tenant dashboard for every module | M1–M9 |

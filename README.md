@@ -43,32 +43,26 @@ Every step is signed and logged, so an auditor, investor, or buyer can check the
 
 ## See it in action
 
-Test a model, clean the data, retrain, and test again. This is real output on made-up support tickets (commands shortened; the exact ones are in SETUP.md):
+Set up a project, then let MP test, clean, retrain, and re-test until the model is safe to release. This is real output on 400 made-up support tickets:
 
 ```
-$ passport llm audit --model models/v1 --corpus data/corpus.jsonl
-entities audited: 300; attack AUC 0.990, TPR at 1% FPR 0.707 (chance: AUC 0.5, TPR 0.01)
-severity: critical 35, high 225, medium 14, low 26
-  [CRITICAL] CREDITCARDNUMBER **************02         risk  9.9  record r375  confirmed, exposure 6.7 bits
-
-$ passport llm sanitize --corpus data/corpus.jsonl --audit reports/v1.json --out data/corpus.v2.jsonl
-$ passport llm finetune --corpus data/corpus.v2.jsonl --out models/v2
-$ passport llm audit --model models/v2 --corpus data/corpus.jsonl
-entities audited: 300; attack AUC 0.519, TPR at 1% FPR 0.003 (chance: AUC 0.5, TPR 0.01)
-severity: critical 0, high 1, medium 0, low 269
-
-# one username still leaks, so round two: sanitize, retrain as v3, audit
-entities audited: 300; attack AUC 0.521, TPR at 1% FPR 0.027 (chance: AUC 0.5, TPR 0.01)
-severity: critical 0, high 0, medium 0, low 268
+$ passport init --llm --corpus corpus.jsonl
+$ passport llm remediate
+v1.0.0: verdict fail, AUC 0.991, critical 107, high 638
+  sanitized 501 values; retraining as v1.1.0
+v1.1.0: verdict fail, AUC 0.6078, critical 0, high 0
+  sanitized 302 values (all CITY, DOB, FULLNAME, IPV4, USERNAME); retraining as v1.2.0
+v1.2.0: verdict pass, AUC 0.4926, critical 0, high 0
+release gate passed at v1.2.0
 ```
 
 How to read the rounds:
 
-- **v1** had memorized 35 card numbers, IBANs, and ID numbers (Critical) and 225 other details (High).
-- **v2:** after cleaning and retraining, the attack was back to chance, except for one username. It had looked safe in v1, so it wasn't cleaned then.
-- **v3:** one more round removed it.
+- **v1.0.0** had memorized 107 card numbers, IBANs, and ID numbers (Critical) and 638 other details (High). An attack score (AUC) of 0.99 means they were easy to spot; 0.5 would be a coin flip.
+- **v1.1.0:** after the risky values were replaced with realistic fakes and the model retrained, no single detail stood out. But the details as a group were still slightly recognizable (AUC 0.61), so every value of those five kinds was replaced.
+- **v1.2.0** passed: an attacker does no better than guessing.
 
-Every High or Critical finding is re-tested with fresh evidence before it counts. That's how v3 correctly ignored a one-off statistical fluke.
+Each version is a signed passport linked to the one before, and old versions and their training data are kept. Every High or Critical finding is re-tested with fresh evidence before it counts.
 
 The passport also covers tabular models, with a readable report and a dashboard:
 

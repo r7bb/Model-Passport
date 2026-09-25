@@ -89,7 +89,32 @@ This checks whether a language model memorized sensitive details from its traini
 pip install "model-passport[llm] @ git+https://github.com/r7bb/Model-Passport"
 ```
 
-### Try it on made-up data
+### The quick way: a project that fixes itself
+
+```bash
+passport llm demo-corpus --records 400 --out corpus.jsonl   # or use your own corpus
+passport init --llm --corpus corpus.jsonl                   # add --base hf:<model id> for a real model
+passport llm remediate                                      # test, clean, retrain, re-test
+```
+
+`remediate` builds a signed passport for each version. The first build tests the model; if the release gate fails, it sanitizes the training copy, retrains, and tests again as the next version (1.0.0 → 1.1.0 → ...), until the gate passes or `--max-rounds` is reached. Remediation works entity by entity, and escalates to a whole type in two cases:
+- the type keeps producing findings in consecutive rounds;
+- the overall attack fails the gate but no single value stands out.
+
+Files in the project:
+
+| Path | What it is |
+|---|---|
+| `data/raw.jsonl` | Your original corpus; every audit tests its values, to prove they are no longer memorized |
+| `data/train.jsonl` | What the model trains on; remediation edits this copy |
+| `data/history/` | The training data of each earlier version |
+| `models/model/` | The fine-tuned model (safetensors) |
+| `reports/entity_audit.json` | The latest audit |
+| `.passport/history/` | Earlier passports |
+
+You can also run the steps yourself: `passport run && passport build`.
+
+### Step by step with the commands
 
 ```bash
 passport llm demo-corpus --records 400 --out data/corpus.jsonl        # fake support tickets with PII
@@ -141,11 +166,13 @@ To add the audit to a passport and its release gate, set `privacy.entity_audit: 
 
 ```yaml
 rules:
-  entity_critical_max: 0                          # any Critical blocks release
-  entity_high_max: {warn: 0}                      # High needs remediation
+  entity_critical_max: 0                          # any confirmed Critical blocks release
+  entity_high_max: 0                              # and so does any confirmed High
   el_mia_auc_max: {warn: 0.55, fail: 0.60}        # 0.5 = chance
   el_mia_tpr_at_1pct_fpr_max: {warn: 0.02, fail: 0.05}   # 0.01 = chance
 ```
+
+`passport init --llm` writes this policy for you.
 
 How the tests work is explained in [section 10](#how-language-models-are-audited).
 
@@ -446,6 +473,8 @@ Run `passport <command> --help` for every option.
 | `passport llm sanitize --corpus --audit --out` | Replaces risky values in the training corpus |
 | `passport llm finetune --corpus --out` | Fine-tunes (retrains) a language model, saved as safetensors |
 | `passport llm demo-corpus` | Writes a made-up corpus for trying things out |
+| `passport init --llm --corpus <file> [--base hf:<id>]` | Sets up a language model project |
+| `passport llm remediate` | Tests, sanitizes, retrains, and re-tests until the release gate passes |
 | `passport push` | Uploads a passport to a registry |
 
 ---
@@ -536,7 +565,7 @@ On an 800-row file with 4 quasi-identifiers, this reaches k-anonymity without re
 pip install -e ".[dev,demo,registry,dashboard]"
 pre-commit install                 # runs lint, type checks, and a secrets scan on every commit
 
-pytest                             # about 220 tests, 88% coverage
+pytest                             # about 230 tests, 88% coverage
 ruff check . && ruff format --check .
 mypy                               # strict mode
 ```

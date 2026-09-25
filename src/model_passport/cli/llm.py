@@ -8,7 +8,6 @@ and works without the ``llm`` extra installed.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -25,21 +24,18 @@ llm_app = typer.Typer(help="Audit language models for memorized PII, and remedia
                       no_args_is_help=True)  # fmt: skip
 app.add_typer(llm_app, name="llm", rich_help_panel=LLM)
 
-FINGERPRINT_ENV = "PASSPORT_FINGERPRINT_KEY"
 CorpusOption = Annotated[
     Path, typer.Option(help="Training corpus: JSONL (text + entities, or AI4Privacy) or .txt.")
 ]
 
 
 def _records(corpus: Path) -> list[Record]:
-    from model_passport.llm.entities import load_corpus
+    from model_passport.llm.stages import StageError, read_corpus
 
-    if not corpus.is_file():
-        fail(f"corpus not found: {corpus}")
-    records = list(load_corpus(corpus))
-    if not any(r.entities for r in records):
-        fail(f"no sensitive entities found in {corpus}; annotate them or check the format")
-    return records
+    try:
+        return read_corpus(corpus)
+    except StageError as exc:
+        fail(str(exc))
 
 
 def _csv(value: str | None) -> tuple[str, ...]:
@@ -107,26 +103,18 @@ def audit(
 ) -> None:
     """Entity-level membership inference audit (EL-MIA) of a model on its training data."""
     from model_passport.llm.audit import AuditSettings
-    from model_passport.llm.audit import audit as run_audit
-    from model_passport.llm.backends import ModelError, load_model
+    from model_passport.llm.backends import ModelError
+    from model_passport.llm.stages import StageError, audit_corpus, fingerprint_key
 
-    records = _records(corpus)
-    try:
-        target = load_model(model, device)
-    except ModelError as exc:
-        fail(str(exc))
-    key = os.environ.get(FINGERPRINT_ENV)
     settings = AuditSettings(
         references=references, reference_source=source, max_entities=max_entities,
         types=_csv(types), primary=primary, fdr=fdr, probe_samples=probe_samples,
-        fingerprint_key=key.encode() if key else None,
+        fingerprint_key=fingerprint_key(),
     )  # fmt: skip
     try:
-        result = run_audit(target, records, settings)
-    except (ModelError, ValueError) as exc:
+        result = audit_corpus(model, corpus, out, settings, device)
+    except (StageError, ModelError, ValueError) as exc:
         fail(str(exc))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
     _print_audit(result)
     typer.echo(f"wrote {out}")
     if fail_on and any(at_least(f.severity, Severity(fail_on)) for f in result.findings):
@@ -190,26 +178,17 @@ def finetune(
     device: Annotated[str | None, typer.Option(help="cpu, cuda, or mps (default: auto).")] = None,
 ) -> None:
     """Fine-tune a causal language model on a corpus (the retrain step of remediation)."""
-    from model_passport.llm import training
-    from model_passport.llm.backends import HuggingFaceModel, ModelError, load_model
+    from model_passport.llm.backends import ModelError
+    from model_passport.llm.stages import StageError, finetune_corpus
+    from model_passport.llm.training import TrainSettings
 
-    texts = [r.text for r in _records(corpus)]
+    settings = TrainSettings(epochs, learning_rate, batch_size, seed=seed, device=device)
     try:
-        if base == "tiny":
-            model = training.tiny_model(texts, seed=seed)
-        else:
-            loaded = load_model(base, device)
-            if not isinstance(loaded, HuggingFaceModel):
-                fail("fine-tuning needs a Hugging Face checkpoint (hf:<id> or a directory)")
-            model = loaded
-        history = training.finetune(
-            model, texts, training.TrainSettings(epochs, learning_rate, batch_size, seed=seed)
-        )
-    except ModelError as exc:
+        history = finetune_corpus(corpus, out, base, settings)
+    except (StageError, ModelError) as exc:
         fail(str(exc))
-    training.save(model, out)
-    typer.echo(f"trained {len(texts)} records for {epochs} epochs; loss " +
-               " -> ".join(f"{h:.3f}" for h in history))  # fmt: skip
+    losses = " -> ".join(f"{h:.3f}" for h in history)
+    typer.echo(f"trained for {epochs} epochs; loss {losses}")
     typer.echo(f"wrote {out}")
 
 
@@ -225,3 +204,41 @@ def demo_corpus(
 
     write_corpus(corpus(records, seed), out)
     typer.echo(f"wrote {records} synthetic records to {out}")
+
+
+@llm_app.command("remediate")
+def remediate(
+    config: Annotated[Path, typer.Option(help="Project config file.")] = Path("passport.yaml"),
+    max_rounds: Annotated[int, typer.Option(help="Sanitize-and-retrain rounds at most.")] = 3,
+    min_severity: Annotated[
+        str, typer.Option(help="Sanitize findings at least this severe.")
+    ] = "medium",
+    always: Annotated[
+        str, typer.Option(help="Entity types never to train on, comma separated.")
+    ] = "SSN,CREDITCARDNUMBER",
+    strategy: Annotated[str, typer.Option(help="surrogate, mask, or drop.")] = "surrogate",
+) -> None:
+    """Build, and while the release gate fails: sanitize, retrain, re-audit as a new version.
+
+    Every round is a signed passport linked to the one before; old passports and training data
+    are archived under .passport/history and data/history.
+    """
+    from model_passport.core.builder import BuildError
+    from model_passport.core.capture import CaptureError
+    from model_passport.llm.remediate import (
+        RemediationError,
+        RemediationSettings,
+        gate_passed,
+    )
+    from model_passport.llm.remediate import remediate as run_remediate
+
+    settings = RemediationSettings(
+        max_rounds=max_rounds, min_severity=Severity(min_severity), always=_csv(always),
+        strategy=strategy,
+    )  # fmt: skip
+    try:
+        rounds = run_remediate(config, settings, echo=typer.echo)
+    except (RemediationError, BuildError, CaptureError, ValueError) as exc:
+        fail(str(exc))
+    if not gate_passed(rounds):
+        raise typer.Exit(EXIT_FAIL)

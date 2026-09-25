@@ -129,6 +129,22 @@ def _init_data_project(root: Path, name: str, data: Path, label: str | None, for
         typer.echo("wrote policy.yaml (the pass/fail limits)")
 
 
+def _init_llm_project(root: Path, name: str, corpus: Path | None, base: str, force: bool) -> None:
+    from model_passport.llm.project import scaffold  # noqa: PLC0415 - needs the llm extra
+
+    if corpus is None:
+        fail("--corpus is required with --llm: the training text (JSONL with entities, or .txt)")
+    source = corpus if corpus.is_absolute() else Path.cwd() / corpus
+    if not source.is_file():
+        fail(f"corpus not found: {corpus}")
+    try:
+        written = scaffold(root, name, source, base, force=force)
+    except (ValueError, ImportError) as exc:
+        fail(str(exc))
+    for relative in written:
+        typer.echo(f"wrote {relative}")
+
+
 @app.command(rich_help_panel=BUILD)
 def init(
     directory: Annotated[Path, typer.Argument(help="Project directory.")] = Path(),
@@ -142,6 +158,15 @@ def init(
     label: Annotated[
         str | None, typer.Option(help="Column to predict (required with --data).")
     ] = None,
+    llm: Annotated[
+        bool, typer.Option("--llm", help="A language model project (use with --corpus).")
+    ] = False,
+    corpus: Annotated[
+        Path | None, typer.Option(help="Training text for --llm (JSONL with entities, or .txt).")
+    ] = None,
+    base: Annotated[
+        str, typer.Option(help="Model to fine-tune for --llm: hf:<id>, a directory, or tiny.")
+    ] = "tiny",
     force: Annotated[
         bool, typer.Option("--force", help="Overwrite an existing config and signing key.")
     ] = False,
@@ -155,7 +180,9 @@ def init(
     root.mkdir(parents=True, exist_ok=True)
     model_name = name or root.name
 
-    if data is not None:
+    if llm:
+        _init_llm_project(root, model_name, corpus, base, force)
+    elif data is not None:
         _init_data_project(root, model_name, data, label, force)
     elif _write_new(root / CONFIG_FILENAME, CONFIG_TEMPLATE.format(name=model_name), force):
         typer.echo(f"wrote {CONFIG_FILENAME}")
@@ -178,7 +205,7 @@ def init(
     typer.echo(f"public key fingerprint: {fingerprint}")
     if _ensure_gitignored(root):
         typer.echo(f"added {GITIGNORE_ENTRY} to .gitignore")
-    if data is not None:
+    if data is not None or llm:
         typer.echo("next: passport run && passport build")
 
 

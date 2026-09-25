@@ -72,6 +72,7 @@ class AuditSettings:
     methods: tuple[str, ...] = m.LIKELIHOOD_METHODS
     primary: str = "auto"  # the strongest method, chosen by cross-fitting (see evidence.py)
     references: int = 5
+    # EL-MIA's "untrained" setting: the strongest attacker, so the worst case for the defender.
     reference_source: str = "synthetic"
     suffix_window: int | None = None
     max_entities: int = 2_000
@@ -375,7 +376,8 @@ def audit(
         extraction = list(member)
     pairs = _findings(found, list(member), p, s, extraction)
     control_rate = float(np.mean(control)) if len(control) else 0.0
-    confirmer = ReferenceSampler(records, s.reference_source, s.seed + 1)  # fresh references
+    # Confirmation repeats the test with fresh alternatives from the same source (a new seed).
+    confirmer = ReferenceSampler(records, s.reference_source, s.seed + 1)
     _confirm(pairs, model, s, confirmer, max(control_rate, 1 / (s.probe_samples + 2)))
     findings, counts = _summarize(pairs, s.fdr)
     if found:

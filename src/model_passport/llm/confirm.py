@@ -5,10 +5,10 @@ chance, so each High or Critical finding is re-tested with fresh evidence before
 a release:
 
 - **Models with log-probs:** the exposure test (Carlini et al., "The Secret Sharer", USENIX
-  Security 2019). The real value is ranked against N fresh same-type alternatives by the
-  likelihood of the value and what follows it. A memorized value ranks at or near the top; a
-  chance finding lands anywhere. The p-value is rank / (N + 1), and exposure is
-  log2(N + 1) - log2(rank) bits.
+  Security 2019). The real value is ranked against N fresh same-type alternatives, drawn from
+  the same source as the screening references but independently, by the likelihood of the
+  value and what follows it. A memorized value ranks at or near the top; a chance finding lands
+  anywhere. The p-value is rank / (N + 1), and exposure is log2(N + 1) - log2(rank) bits.
 - **Generation-only models:** the value is probed again with more samples, and the hits are
   tested against the pooled rate at which the model emits same-type controls.
 
