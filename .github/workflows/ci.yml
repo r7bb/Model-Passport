@@ -128,7 +128,14 @@ jobs:
           sed -i "s/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)/" .env
       - run: docker compose config --quiet
       - run: docker compose build
-      - run: docker compose up -d
+      - name: Start the stack
+        run: |
+          set -o pipefail
+          if ! docker compose up -d 2>&1 | tee /tmp/up.log; then
+            # Workflow-command properties must not contain ":" or ","; messages keep one line.
+            echo "::error title=compose up failed::$(tail -n 8 /tmp/up.log | tr '\n' '|' | cut -c1-900)"
+            exit 1
+          fi
       - name: Wait for every service to be healthy
         run: |
           check() {  # name url
@@ -146,10 +153,10 @@ jobs:
       - name: Report container state and logs as annotations
         if: failure()
         run: |
-          docker compose ps -a
+          echo "::error title=container state::$(docker compose ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' | tr '\n' '|')"
           for service in $(docker compose config --services); do
             tail=$(docker compose logs --no-color --tail 15 "$service" 2>&1 | tr '\n' '|' | cut -c1-900)
-            echo "::error title=logs: $service::$tail"
+            echo "::error title=logs of $service::$tail"
           done
       - if: always()
         run: docker compose down -v
