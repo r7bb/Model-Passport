@@ -100,6 +100,10 @@ class PrivacyConfig(_Strict):
     sensitive_column: str | None = None
     presidio: bool = False
     scan_secrets: bool = True
+    entity_audit: Path | None = Field(
+        default=None,
+        description="Entity-level audit JSON from `passport llm audit`; signed with the passport.",
+    )
 
 
 class AuditConfig(_Strict):

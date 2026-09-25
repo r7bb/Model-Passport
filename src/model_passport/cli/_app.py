@@ -36,8 +36,9 @@ def _root(
 
 
 # Help panels, numbered in workflow order (modules register in this order; see __init__).
-BUILD, INSPECT, NEW_DATA, SHARE, CHECKS = (
+BUILD, INSPECT, NEW_DATA, SHARE, CHECKS, LLM = (
     "1. Build a passport", "2. Inspect", "3. New data", "4. Share", "5. Individual checks",
+    "6. Language models",
 )  # fmt: skip
 
 # Exit codes: 0 ok / pass, 1 policy fail / verification fail / drift, 2 usage or input error.

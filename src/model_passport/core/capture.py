@@ -146,14 +146,14 @@ def stage_script(stage: StageConfig) -> Path:
 
 def hash_path(root: Path, path: Path, kind: ArtifactKind = ArtifactKind.OTHER) -> ArtifactRef:
     full = (root / path).resolve()
-    if not full.is_file():
+    if not full.exists():
         raise CaptureError(f"file not found: {path}")
     try:
         rel = full.relative_to(root).as_posix()
     except ValueError:
         rel = full.as_posix()
     return ArtifactRef(
-        path=rel, sha256=identity.sha256_file(full), size_bytes=full.stat().st_size, kind=kind
+        path=rel, sha256=identity.sha256_path(full), size_bytes=identity.path_size(full), kind=kind
     )
 
 
@@ -181,7 +181,7 @@ def run_stage(
     if result.returncode != 0:
         raise CaptureError(f"stage {stage.name!r} failed with exit code {result.returncode}")
 
-    missing = [str(out) for out in stage.outs if not (root / out).is_file()]
+    missing = [str(out) for out in stage.outs if not (root / out).exists()]
     if missing:
         raise CaptureError(f"stage {stage.name!r} did not produce: {', '.join(missing)}")
 

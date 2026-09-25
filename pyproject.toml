@@ -50,6 +50,9 @@ dashboard = ["streamlit>=1.35", "httpx>=0.27"]
 mlflow = ["mlflow>=2.10"]
 presidio = ["presidio-analyzer>=2.2"]
 demo = ["faker>=24"]
+# Entity-level audits of language models (Hugging Face, OpenAI-compatible, Anthropic, OpenAI).
+llm = ["torch>=2.4", "transformers>=4.45", "tokenizers>=0.20", "safetensors>=0.4",
+       "faker>=24", "httpx>=0.27"]
 docs = ["playwright>=1.44"]  # scripts/screenshot.py; then: python -m playwright install chromium
 dev = [
     "pytest>=8",
@@ -138,3 +141,9 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["picklescan.*", "joblib.*", "sklearn.*", "presidio_analyzer.*", "mlflow.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Deep-learning libraries are partly typed; treat them as Any rather than half-checked.
+module = ["torch.*", "transformers.*", "tokenizers.*", "safetensors.*", "faker.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

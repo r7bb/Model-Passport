@@ -1,10 +1,10 @@
-# Model Passport roadmap
+# MP roadmap
 
-Model Passport extends the AIPassport framework (Kalokyri et al., arXiv 2506.22358) with privacy scanning, leakage auditing, artifact safety checks, signed identity, a CI policy gate, monitoring, and adaptive training on any tabular data.
+MP (Model Passport) is an entity-level PII leakage auditing and remediation platform: it finds personal data a model memorized, removes it, verifies the fix, and records every step in a signed passport. It builds on EL-MIA (Satvaty et al., LREC 2026) and the AIPassport framework (Kalokyri et al., arXiv 2506.22358).
 
 ## Where things stand
 
-All seven phases are done: 198 tests at 92% coverage, strict ruff and mypy, and green CI (lint, tests on Python 3.11 and 3.12, the full demo lifecycle, and the Docker stack).
+The passport engine (phases 1–7) and platform phase A are done: 222 tests at 88% coverage, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Platform phases B–G are next; see the build plan below.
 
 | Phase | What it delivers |
 |---|---|
@@ -15,6 +15,7 @@ All seven phases are done: 198 tests at 92% coverage, strict ruff and mypy, and 
 | 5. Sharing | Registry API, HTML report, JSON-LD export, Streamlit dashboard, Docker Compose |
 | 6. Monitoring | Signed drift events, schema and live accuracy checks, linked and archived model versions |
 | 7. Any data | `passport init --data --label`, automatic cleaning and typing, several model families chosen by cross-validation under an overfitting limit, regression support, `passport prepare` |
+| A. Entity audit | `passport llm audit`, `sanitize`, `finetune`. The seven EL-MIA methods with the strongest chosen by cross-fitting; Gaussian null (LiRA); FDR control; likelihood × impact risk in CVSS bands; exposure-test confirmation; extraction probing for API models; audit results signed into the passport and its policy gate |
 
 ## Decisions
 
@@ -30,16 +31,25 @@ All seven phases are done: 198 tests at 92% coverage, strict ruff and mypy, and 
 
 The passport also adds `artifacts`, `run`, and `revision` sections beyond the v0.1 spec.
 
-## Next up
+## Platform build plan
 
-In priority order:
+MP is becoming an **entity-level PII leakage auditing and remediation platform**, following the product flow chart (2026-09-25). Why it exists:
+- **Research gap:** LLMs memorize individual sensitive entities, and whole-document attacks miss this (EL-MIA, Satvaty et al., LREC 2026).
+- **Market gap:** investors and acquirers now scrutinize where AI training data came from.
 
-1. **Easy install (built, waiting to publish):** the package, GitHub Action, and release workflow for PyPI and GHCR are ready and tested in CI. The first release needs the one-time PyPI setup in SETUP.md, then a `v0.2.0` tag.
-2. **Safer model files:** save models with skops or ONNX instead of pickle, which removes the "raw pickle" warning.
-3. **Fairness checks:** accuracy and error rates per group (for example, by gender or age range), with policy limits.
-4. **Explanations:** the features that matter most (permutation importance) shown in the report and dashboard.
-5. **Better probabilities:** calibration and a decision threshold tuned for the goal (accuracy, recall, or cost).
-6. **Time-aware splits:** when data has a date column, train on the past and test on the future, so the score reflects real use.
+MP audits every sensitive entity, removes the risk, verifies the fix, and only then deploys. The passport engine built so far becomes its core: provenance (M9), the signed audit log (M4), and version history (M6).
+
+Decisions: build all modules; audit open-weight and API models from the start; remediate by sanitizing data and retraining; set risk thresholds by industry practice. That means attack success at low false-positive rates (Carlini et al. 2022), CVSS-style severity bands, likelihood × impact risk (NIST SP 800-30), and findings mapped to OWASP LLM02 and NIST AI 100-2.
+
+| Phase | Delivers | Modules |
+|---|---|---|
+| A. Entity audit engine (**done**) | Find sensitive entities in training text. Score each one's memorization with the EL-MIA methods (loss, zlib, min-k%, ReCaLL, and the reference-set attacks). Report per-entity risk with false-discovery control and AUC / TPR at low FPR. Works with Hugging Face models, OpenAI-compatible servers with log-probs, and extraction probing for API-only models. | M5 |
+| B. Remediation | Sanitize risky entities (surrogate, mask, or drop), fine-tune again from the base checkpoint, re-audit, and link the new version to the old one in a signed passport | M6, M7 |
+| C. Backend | FastAPI with PostgreSQL: tenants, 7 roles, RBAC, append-only audit log, per-tenant encrypted object storage, job queue and Python workers, provenance and diligence reports | M2, M3, M4, M9 |
+| D. Control plane | Go control plane (orchestration, deploy, rollback, kill switch) over gRPC, API gateway (subdomain → tenant, login check), and the `mp` CLI | M7, M8 |
+| E. Web app | Next.js super-admin console and tenant dashboard for every module | M1–M9 |
+| F. Release flow | Canary release to developer endpoints, verification (re-audit, canary testers, Claude/GPT probing), approval, consumer release, monitoring, rollback, kill switch | M8 |
+| G. Infrastructure | Dockerfiles for every service, Docker Compose, Helm chart for Kubernetes, and Terraform for the cloud (network, cluster, database, encrypted storage) | |
 
 ## Ideas for later
 

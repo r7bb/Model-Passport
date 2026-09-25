@@ -5,16 +5,17 @@ This guide takes you from nothing installed to a signed model passport, step by 
 **Contents**
 
 1. [Install](#1-install)
-2. [Run the demo](#2-run-the-demo)
-3. [Use your own data](#3-use-your-own-data)
-4. [Check new data](#4-check-new-data)
-5. [Dashboard and registry](#5-dashboard-and-registry)
-6. [Run everything with Docker](#6-run-everything-with-docker)
-7. [Block unsafe models in CI](#7-block-unsafe-models-in-ci)
-8. [Command reference](#8-command-reference)
-9. [How it works](#9-how-it-works)
-10. [Contributing](#10-contributing)
-11. [Troubleshooting](#11-troubleshooting)
+2. [Audit a language model](#2-audit-a-language-model)
+3. [Run the demo](#3-run-the-demo)
+4. [Use your own data](#4-use-your-own-data)
+5. [Check new data](#5-check-new-data)
+6. [Dashboard and registry](#6-dashboard-and-registry)
+7. [Run everything with Docker](#7-run-everything-with-docker)
+8. [Block unsafe models in CI](#8-block-unsafe-models-in-ci)
+9. [Command reference](#9-command-reference)
+10. [How it works](#10-how-it-works)
+11. [Contributing](#11-contributing)
+12. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -26,7 +27,7 @@ This guide takes you from nothing installed to a signed model passport, step by 
 |---|---|---|
 | Python 3.11 or newer | Model Passport is written in Python | [python.org/downloads](https://www.python.org/downloads/), or `brew install python@3.11` on macOS |
 | Git | To download the code and record which code version trained a model | [git-scm.com](https://git-scm.com/downloads) |
-| Docker (optional) | Only for [section 6](#6-run-everything-with-docker) | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| Docker (optional) | Only for [section 7](#7-run-everything-with-docker) | [docker.com](https://www.docker.com/products/docker-desktop/) |
 
 Check your Python version. It must print 3.11 or higher:
 
@@ -80,7 +81,77 @@ Add any of these inside the brackets, separated by commas, for example `pip inst
 
 ---
 
-## 2. Run the demo
+## 2. Audit a language model
+
+This checks whether a language model memorized sensitive details from its training text, fixes it, and proves the fix. Install the language-model extra first:
+
+```bash
+pip install "model-passport[llm] @ git+https://github.com/r7bb/Model-Passport"
+```
+
+### Try it on made-up data
+
+```bash
+passport llm demo-corpus --records 400 --out data/corpus.jsonl        # fake support tickets with PII
+passport llm finetune --corpus data/corpus.jsonl --out models/v1 \
+    --epochs 15 --lr 2e-3 --batch-size 32                              # a small model that memorizes
+passport llm audit --model models/v1 --corpus data/corpus.jsonl \
+    --max-entities 300 --out reports/v1.json                           # find what it memorized
+passport llm sanitize --corpus data/corpus.jsonl --audit reports/v1.json \
+    --always SSN,CREDITCARDNUMBER --out data/corpus.v2.jsonl           # replace the risky values
+passport llm finetune --corpus data/corpus.v2.jsonl --out models/v2 \
+    --epochs 15 --lr 2e-3 --batch-size 32                              # retrain
+passport llm audit --model models/v2 --corpus data/corpus.jsonl \
+    --max-entities 300 --out reports/v2.json                           # check again
+```
+
+If anything High or Critical is left, repeat sanitize → finetune → audit with the latest audit. The whole loop takes under a minute on a laptop.
+
+### Your own model and data
+
+**The corpus** is the training text, as JSONL. Each line is one record with its sensitive spans:
+
+```json
+{"id": "t-17", "text": "Refund jane@example.com today", "entities": [{"start": 7, "end": 23, "type": "EMAIL"}]}
+```
+
+- AI4Privacy-format files (`source_text` and `privacy_mask`) work as-is.
+- Plain `.txt` files (one record per line) also work. Emails, phone numbers, SSNs, card numbers, IP addresses, and dates are then found automatically; names and addresses need annotations.
+
+**The model** is given with `--model`:
+
+| Model | `--model` value | How it's tested |
+|---|---|---|
+| Hugging Face model | `hf:EleutherAI/pythia-160m` or a local folder | Likelihood attacks (strongest) |
+| Self-hosted server with log-probs (vLLM, TGI) | `openai-compatible:http://host:8000/v1#model-name` | Likelihood attacks |
+| Claude | `anthropic:claude-sonnet-5` (needs `ANTHROPIC_API_KEY`) | Extraction probing |
+| OpenAI | `openai:<model>` (needs `OPENAI_API_KEY`) | Extraction probing |
+
+Useful audit options: `--types EMAIL,SSN` (only some types), `--max-entities` (sample size), `--source synthetic|corpus|mix` (where look-alike values come from), `--fail-on high` (exit with an error for CI), and `--device cuda`.
+
+To identify values across audits without storing them, set `PASSPORT_FINGERPRINT_KEY` to a secret per organization. Findings then carry a keyed hash.
+
+### Reading the results
+
+- **Attack AUC** is how well the test tells memorized values from look-alikes: 0.5 is chance, 1.0 is certain.
+- **TPR at 1% FPR** is the share of memorized values caught while only 1% of look-alikes are wrongly flagged. Chance is 0.01. This is the standard way to judge these attacks.
+- **Each finding** has a risk score from 0 to 10: how certain the evidence is, times how harmful that type of value is if leaked. Levels are Low (under 4), Medium (4–6.9), High (7–8.9), and Critical (9 or more).
+
+To add the audit to a passport and its release gate, set `privacy.entity_audit: reports/v2.json` in `passport.yaml` and add these rules to `policy.yaml`:
+
+```yaml
+rules:
+  entity_critical_max: 0                          # any Critical blocks release
+  entity_high_max: {warn: 0}                      # High needs remediation
+  el_mia_auc_max: {warn: 0.55, fail: 0.60}        # 0.5 = chance
+  el_mia_tpr_at_1pct_fpr_max: {warn: 0.02, fail: 0.05}   # 0.01 = chance
+```
+
+How the tests work is explained in [section 10](#how-language-models-are-audited).
+
+---
+
+## 3. Run the demo
 
 The demo trains a model that predicts income from made-up census-style records. The data includes fake names, emails, and phone numbers so the checks have something to find. No real people are involved.
 
@@ -142,7 +213,7 @@ passport run && passport build   # rebuild to get back to a clean state
 
 ---
 
-## 3. Use your own data
+## 4. Use your own data
 
 ### The quick way: a data file and a label
 
@@ -242,7 +313,7 @@ Use `--no-link` to start a fresh history instead.
 
 ---
 
-## 4. Check new data
+## 5. Check new data
 
 When new data arrives, check whether it still looks like the training data:
 
@@ -272,7 +343,7 @@ Tuning options: `--alpha` (significance level, default 0.01), `--psi-threshold` 
 
 ---
 
-## 5. Dashboard and registry
+## 6. Dashboard and registry
 
 ### Dashboard on your own machine
 
@@ -302,7 +373,7 @@ To require a password (bearer token) for uploads, set `PASSPORT_REGISTRY_TOKEN` 
 
 ---
 
-## 6. Run everything with Docker
+## 7. Run everything with Docker
 
 Docker starts the dashboard, the registry, MLflow, and SeaweedFS (S3-compatible file storage for MLflow) together, with nothing else to install:
 
@@ -322,7 +393,7 @@ To log runs to MLflow, set `tracking.mlflow_uri: http://localhost:5000` in `pass
 
 ---
 
-## 7. Block unsafe models in CI
+## 8. Block unsafe models in CI
 
 Use the Model Passport GitHub Action. It runs your pipeline, builds and verifies the passport, and uploads it with its report. The job fails when the verdict is FAIL, and the job summary lists every rule:
 
@@ -351,7 +422,7 @@ Outputs: `verdict` and `passport-id`. Other CI systems can run the same commands
 
 ---
 
-## 8. Command reference
+## 9. Command reference
 
 Run `passport <command> --help` for every option.
 
@@ -371,11 +442,33 @@ Run `passport <command> --help` for every option.
 | `passport prepare <batch>` | Prepares a raw batch exactly like the training data |
 | `passport monitor drift <batch>` | Checks new data and records the result |
 | `passport serve` | Starts the registry |
+| `passport llm audit --model --corpus` | Entity-level memorization audit of a language model |
+| `passport llm sanitize --corpus --audit --out` | Replaces risky values in the training corpus |
+| `passport llm finetune --corpus --out` | Fine-tunes (retrains) a language model, saved as safetensors |
+| `passport llm demo-corpus` | Writes a made-up corpus for trying things out |
 | `passport push` | Uploads a passport to a registry |
 
 ---
 
-## 9. How it works
+## 10. How it works
+
+### How language models are audited
+
+For every sensitive value in the training text, MP builds three versions of its sentence:
+- **the real one;**
+- **a control:** the same sentence with a look-alike value the model never saw;
+- **reference variants:** five more look-alikes for each of those two.
+
+A memorized value is one the model prefers over its look-alikes more than it prefers the controls.
+
+1. **Seven tests**, from the EL-MIA paper and the research it builds on: loss, zlib, Min-K%, ReCaLL, suffix loss, and the reference-set attacks, which compare the real value with its look-alikes. The audit uses whichever is strongest for your model. It picks on one half of the entities and scores the other half, then swaps, so the choice doesn't inflate the results. This follows the rule that an auditor should assume the strongest attacker.
+2. **Per-value evidence:** each score is compared with the controls of the same type, using a robust Gaussian fit as in LiRA (Carlini et al. 2022). Results are then corrected for testing thousands of values at once (Benjamini-Hochberg false discovery rate, 5%).
+3. **Risk** is likelihood × impact (NIST SP 800-30), on a 0–10 scale with CVSS severity bands. Impact comes from the type of value, following NIST SP 800-122: card numbers, SSNs, and bank details 1.0; emails, phones, and addresses 0.8; names and cities 0.6; other attributes 0.4.
+4. **Confirmation:** every High or Critical finding is re-tested with 100 fresh look-alikes (the exposure test from Carlini et al., "The Secret Sharer"). Findings that fail are capped at Low.
+
+For models behind an API without log-probs, the audit shows the model the text before each value and counts how often it writes the value out, compared with how often it writes look-alikes.
+
+Findings are mapped to OWASP LLM02:2025 (Sensitive Information Disclosure) and NIST AI 100-2. Reports store masked values only, never the real ones.
 
 ### How the model is chosen
 
@@ -437,13 +530,13 @@ On an 800-row file with 4 quasi-identifiers, this reaches k-anonymity without re
 
 ---
 
-## 10. Contributing
+## 11. Contributing
 
 ```bash
 pip install -e ".[dev,demo,registry,dashboard]"
 pre-commit install                 # runs lint, type checks, and a secrets scan on every commit
 
-pytest                             # about 200 tests, 92% coverage
+pytest                             # about 220 tests, 88% coverage
 ruff check . && ruff format --check .
 mypy                               # strict mode
 ```
@@ -473,7 +566,7 @@ python scripts/terminal_shot.py --help
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -481,7 +574,7 @@ python scripts/terminal_shot.py --help
 | `python3 --version` shows 3.9 or 3.10 | Install Python 3.11+, then create the environment with it: `python3.11 -m venv .venv` |
 | `passport init` says "kept existing" | That's expected: it never overwrites your config or key. `--force` replaces both, but older passports then need the old public key to verify. |
 | `verify` reports a changed file you didn't mean to change | Rerun `passport run && passport build` to certify the current files |
-| `monitor drift` reports schema problems | Prepare the batch first: `passport prepare <batch>` (see [section 4](#4-check-new-data)) |
+| `monitor drift` reports schema problems | Prepare the batch first: `passport prepare <batch>` (see [section 5](#5-check-new-data)) |
 | A stage stops with "label ... has 1 distinct value" or "only N usable rows" | The data can't train a model yet: check the label column and collect more rows |
 | The train stage says "no candidate had a gap within 0.05" | Every model overfits, usually because the data is small. Add rows, or raise `max_gap` knowing the privacy gate may warn |
 | k-anonymity shows "not evaluated: no quasi-identifiers found" | List the columns that could identify a person under `privacy.quasi_identifiers` in `passport.yaml`, or ignore the warning if there are none |

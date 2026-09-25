@@ -20,6 +20,7 @@ from model_passport.core.schema import DependencyAudit, Finding, Severity
 
 PICKLE_SUFFIXES = {".pkl", ".pickle", ".joblib", ".pt", ".pth", ".ckpt", ".bin", ".npy"}
 SAFE_SUFFIXES = {".safetensors", ".onnx", ".json", ".txt", ".ubj"}
+WEIGHT_SUFFIXES = {".safetensors", ".onnx", ".gguf"}  # weight formats inside checkpoint folders
 OSV_VULN_URL = "https://api.osv.dev/v1/vulns/{id}"
 GHSA_SEVERITY = {
     "LOW": Severity.LOW,
@@ -42,8 +43,18 @@ def is_pickle_like(path: Path) -> bool:
 
 
 def scan_model_file(path: Path, label: str | None = None) -> list[Finding]:
-    """Scan a serialized model. Dangerous pickle imports are critical; raw pickle is low."""
+    """Scan a serialized model. Dangerous pickle imports are critical; raw pickle is low.
+
+    A directory (a Hugging Face checkpoint) is scanned file by file: weights and pickles are
+    checked, and configuration and tokenizer files are skipped.
+    """
     label = label or path.name
+    if path.is_dir():
+        findings: list[Finding] = []
+        for file in sorted(p for p in path.rglob("*") if p.is_file()):
+            if file.suffix.lower() in WEIGHT_SUFFIXES or is_pickle_like(file):
+                findings.extend(scan_model_file(file, f"{label}/{file.relative_to(path)}"))
+        return findings
     suffix = path.suffix.lower()
     if suffix in SAFE_SUFFIXES:
         return [

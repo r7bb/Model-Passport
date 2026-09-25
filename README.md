@@ -1,98 +1,105 @@
-# Model Passport
+# MP: Model Passport
 
 [![CI](https://github.com/r7bb/Model-Passport/actions/workflows/ci.yml/badge.svg)](https://github.com/r7bb/Model-Passport/actions/workflows/ci.yml)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-**A passport for AI models: proof of where a model came from, and a safety check before it's used.**
+**Find the personal data an AI model has memorized, remove it, prove it's gone, and only then release the model.**
 
-A person's passport says who they are and where they're from, and it's hard to fake. Model Passport gives an AI model the same thing. Each time a model is trained, it creates a document that records:
+## Why it exists
 
-- **What went into it:** the data, the code, and the settings.
-- **How well it works:** its test scores.
-- **Whether it's safe:** the results of privacy and security checks.
+AI language models learn from huge amounts of text, and that text often contains people's names, emails, phone numbers, card numbers, and other personal details. Models can **memorize individual details** and repeat them later.
 
-The document is digitally signed, so if anyone changes the model or its data afterward, the passport shows it.
+- **The research gap:** checks that ask "was this whole document in the training data?" miss single memorized details. Research published in 2026 (EL-MIA, LREC 2026) shows how to test each detail on its own.
+- **The market gap:** investors and buyers of AI companies now check where training data came from, and whether it creates privacy risk.
 
-![The Model Passport dashboard](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-simple-view.png)
+MP checks every sensitive detail, removes the risk, verifies the fix, and records every step in a tamper-proof passport.
 
-## Why it matters
+## How it works
 
-AI models learn from data, and that data often comes from real people. Things can go wrong:
+```
+ 1. DETECT                     2. REMEDIATE                  3. VERIFY & RELEASE
+ ─────────                     ────────────                  ───────────────────
+ Register model and data   →   Replace risky details     →   Test on developer endpoints
+ Test every sensitive          with realistic fakes          Re-test, plus human testers
+ detail for memorization       Retrain the model             and AI probing
+ Flag risky details            Save as a new version         Approve and release, with
+ (Critical can block release)  (old versions are kept)       rollback and a kill switch
+```
 
-- The data may contain **personal details** such as names, emails, or phone numbers.
-- The model may **memorize** people's records and later reveal them.
-- Someone may **swap or alter** the model file after it was approved.
-- The world may **change** until the model's predictions quietly stop being accurate.
-
-Model Passport checks for all four and gives a clear **PASS** or **FAIL**.
+Every step is signed and logged, so an auditor, investor, or buyer can check the whole history.
 
 ## What it checks
 
 | Check | In plain words |
 |---|---|
-| Personal information | Are there names, emails, phone numbers, or ID numbers in the data? |
-| Re-identification risk | Could someone single out a person by combining details like age and ZIP code? |
-| Memorization | Did the model memorize its training data instead of learning general patterns? |
+| Memorized details | For each name, email, card number, and so on in the training data: does the model prefer the real value over look-alike fakes? If so, it memorized it. |
+| Leakage on request | For models behind an API: does the model write out a real value when shown the text that came before it? |
+| Risk level | Each finding gets a risk score from 0 to 10 and a level (Low, Medium, High, Critical), based on how certain the evidence is and how harmful that kind of detail is if leaked. |
+| Personal data in datasets | Are there names, emails, phone numbers, or ID numbers in tables of training data? Could someone single out a person? |
+| Tampering | Has the model, the data, or anything else changed since it was approved? |
 | File safety | Could the model file run harmful code when opened? Are any software parts known to be unsafe? |
-| Leaked passwords | Were passwords or access keys left in the code? |
-| Tampering | Has anything changed since the passport was signed? |
-| New data | When new data arrives, is it still similar enough for the model to work well? |
-
-## Works with your own data
-
-Give it a data file and name the column you want to predict. Model Passport does the rest:
-
-1. **Cleans the data:** removes blank and duplicate rows, and reads numbers, dates, and codes correctly.
-2. **Protects people:** removes names, emails, and ID numbers, and groups details like age into ranges.
-3. **Picks the best model:** tries several kinds of model and keeps the most accurate one that doesn't memorize its training data.
-4. **Checks and signs the result**, so anyone can confirm it later.
-
-It's been tested on data with messy formats, missing values, rare categories, and data that changes over time.
+| Changing data | Is new data still similar enough to what the model was trained on? |
 
 ## See it in action
 
-**Unsafe data and a model that memorizes are caught and blocked:**
+Test a model, clean the data, retrain, and test again. This is real output on made-up support tickets (commands shortened; the exact ones are in SETUP.md):
 
-![A failing safety check](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/cli-build-fail.png)
+```
+$ passport llm audit --model models/v1 --corpus data/corpus.jsonl
+entities audited: 300; attack AUC 0.990, TPR at 1% FPR 0.707 (chance: AUC 0.5, TPR 0.01)
+severity: critical 35, high 225, medium 14, low 26
+  [CRITICAL] CREDITCARDNUMBER **************02         risk  9.9  record r375  confirmed, exposure 6.7 bits
 
-**A model file that was changed after signing is named:**
+$ passport llm sanitize --corpus data/corpus.jsonl --audit reports/v1.json --out data/corpus.v2.jsonl
+$ passport llm finetune --corpus data/corpus.v2.jsonl --out models/v2
+$ passport llm audit --model models/v2 --corpus data/corpus.jsonl
+entities audited: 300; attack AUC 0.519, TPR at 1% FPR 0.003 (chance: AUC 0.5, TPR 0.01)
+severity: critical 0, high 1, medium 0, low 269
 
-![Tampering detected](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/cli-verify-tamper.png)
+# one username still leaks, so round two: sanitize, retrain as v3, audit
+entities audited: 300; attack AUC 0.521, TPR at 1% FPR 0.027 (chance: AUC 0.5, TPR 0.01)
+severity: critical 0, high 0, medium 0, low 268
+```
 
-**New data that looks different from the training data triggers a retraining alert:**
+How to read the rounds:
 
-![Changing data detected](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/cli-monitor-drift.png)
+- **v1** had memorized 35 card numbers, IBANs, and ID numbers (Critical) and 225 other details (High).
+- **v2:** after cleaning and retraining, the attack was back to chance, except for one username. It had looked safe in v1, so it wasn't cleaned then.
+- **v3:** one more round removed it.
 
-**Every passport also comes as a readable report:**
+Every High or Critical finding is re-tested with fresh evidence before it counts. That's how v3 correctly ignored a one-off statistical fluke.
+
+The passport also covers tabular models, with a readable report and a dashboard:
 
 | Passed | Failed |
 |---|---|
 | ![Passing report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-pass.png) | ![Failing report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-fail.png) |
 
-**The dashboard shows how a model was built, its privacy results, and how it holds up over time:**
-
-| How it was built | Its version history |
+| How it was built | Privacy results |
 |---|---|
-| ![Pipeline](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-pipeline.png) | ![Lineage](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-lineage.png) |
-| **Privacy results** | **Checks on new data** |
-| ![Privacy](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-privacy.png) | ![Monitoring](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-monitoring.png) |
+| ![Pipeline](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-pipeline.png) | ![Privacy](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-privacy.png) |
+
+## What's ready, and what's coming
+
+| Ready now | Being built |
+|---|---|
+| Memorization testing of language models, for open models and API models | The web app: a console for administrators, and a dashboard for each organization |
+| Risk scores and a release gate based on industry practice | Organizations with separate data, and roles (admin, engineer, auditor, tester, reviewer) |
+| Cleaning risky details and retraining | Test endpoints, approvals, release, rollback, and a kill switch |
+| Signed passports, version history, and tamper checks | Reports for investors and buyers (due diligence) |
+| Checks for tabular models and datasets, drift monitoring, and a GitHub Action | Cloud deployment (Kubernetes, Terraform) |
+
+See [ROADMAP.md](https://github.com/r7bb/Model-Passport/blob/main/ROADMAP.md) for the full plan.
 
 ## Try it
 
-A built-in demo uses made-up data (no real people) to show a model failing the checks, then passing after it's fixed. With your own data file, it takes two commands:
-
-```bash
-passport init --data customers.csv --label churn
-passport run && passport build
-```
-
-Step-by-step instructions are in **[SETUP.md](https://github.com/r7bb/Model-Passport/blob/main/SETUP.md)**: installing, running the demo, using your own data, and troubleshooting.
+Instructions are in **[SETUP.md](https://github.com/r7bb/Model-Passport/blob/main/SETUP.md)**. They cover installing, testing a language model, the tabular demo, using your own data, and troubleshooting. The built-in examples use made-up data only, with no real people.
 
 ## Learn more
 
 - [SETUP.md](https://github.com/r7bb/Model-Passport/blob/main/SETUP.md): installation, commands, and technical details
 - [ROADMAP.md](https://github.com/r7bb/Model-Passport/blob/main/ROADMAP.md): what's done and what's next
-- Model Passport builds on the AIPassport research framework (Kalokyri et al., [arXiv 2506.22358](https://arxiv.org/abs/2506.22358)).
+- Research: EL-MIA (Satvaty, Verberne, and Turkmen, [LREC 2026](https://aclanthology.org/2026.lrec-1.362/)) and AIPassport (Kalokyri et al., [arXiv 2506.22358](https://arxiv.org/abs/2506.22358))
 
 Free to use under the MIT license ([LICENSE](https://github.com/r7bb/Model-Passport/blob/main/LICENSE)). See [THIRD_PARTY_NOTICES.md](https://github.com/r7bb/Model-Passport/blob/main/THIRD_PARTY_NOTICES.md) for the open-source software it uses.

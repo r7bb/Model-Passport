@@ -58,9 +58,9 @@ class VerificationReport:
 
 def _check_artifact(root: Path, path: str, kind: ArtifactKind, expected: str) -> ArtifactCheck:
     full = root / path
-    if not full.is_file():
+    if not full.exists():
         return ArtifactCheck(path, kind, expected, None, ArtifactStatus.MISSING)
-    actual = identity.sha256_file(full)
+    actual = identity.sha256_path(full)
     status = ArtifactStatus.OK if actual == expected else ArtifactStatus.MODIFIED
     return ArtifactCheck(path, kind, expected, actual, status)
 

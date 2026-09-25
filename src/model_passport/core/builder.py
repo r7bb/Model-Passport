@@ -27,6 +27,7 @@ from model_passport.core.schema import (
     ArtifactKind,
     ArtifactRef,
     DatasetInfo,
+    EntityAuditResult,
     Environment,
     Identity,
     ModelInfo,
@@ -53,12 +54,12 @@ def _relative_path(root: Path, path: Path) -> str:
 
 def _hash_artifact(root: Path, path: Path, kind: ArtifactKind) -> ArtifactRef:
     full = (root / path).resolve()
-    if not full.is_file():
+    if not full.exists():
         raise BuildError(f"{kind.value} artifact not found: {path}")
     return ArtifactRef(
         path=_relative_path(root, path),
-        sha256=identity.sha256_file(full),
-        size_bytes=full.stat().st_size,
+        sha256=identity.sha256_path(full),
+        size_bytes=identity.path_size(full),
         kind=kind,
     )
 
@@ -119,6 +120,8 @@ def build_passport(
 
     manifest = _Manifest(root)
     manifest.add(config_path.resolve(), ArtifactKind.CONFIG)
+    if config.privacy.entity_audit is not None:
+        manifest.add(config.privacy.entity_audit, ArtifactKind.OTHER)
     model_ref = manifest.add(config.build.model.path, ArtifactKind.MODEL)
     datasets = _collect_datasets(manifest, config)
     for extra in config.build.artifacts:
@@ -134,6 +137,7 @@ def build_passport(
     privacy_report, security_report = _run_checks(
         root, config, model_ref, artifacts, datasets, environment, model_fields
     )
+    privacy_report.entity_audit = _load_entity_audit(root, config)
     passport = Passport(
         identity=Identity(
             model_name=config.project.name,
@@ -160,6 +164,16 @@ def build_passport(
     if policy is not None:
         passport.policy = evaluate(policy[0], policy[1], passport)
     return sign_passport(passport, private_key)
+
+
+def _load_entity_audit(root: Path, config: ProjectConfig) -> EntityAuditResult | None:
+    path = config.privacy.entity_audit
+    if path is None:
+        return None
+    try:
+        return EntityAuditResult.model_validate_json((root / path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise BuildError(f"cannot read entity audit {path}: {exc}") from exc
 
 
 def _collect_datasets(manifest: _Manifest, config: ProjectConfig) -> list[tuple[str, DatasetInfo]]:

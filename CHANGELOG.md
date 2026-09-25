@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+MP becomes an entity-level PII leakage auditing and remediation platform (phase A of the platform build plan).
+
+- `passport llm audit`: an entity-level membership inference audit (EL-MIA) of a language model on its training corpus. It runs seven methods and uses the strongest, chosen by cross-fitting. Each entity gets a p-value against controls (robust Gaussian null), false-discovery control, and a likelihood × impact risk in CVSS bands. High and Critical findings are confirmed with the exposure test. Reports include AUC and TPR at low FPR.
+- Backends: Hugging Face models, OpenAI-compatible servers with prompt log-probs (likelihood attacks), and Anthropic and OpenAI chat models (extraction probing).
+- `passport llm sanitize` (surrogate, mask, or drop) and `passport llm finetune` (safetensors) for the remediation loop; `passport llm demo-corpus` for synthetic data.
+- Passports can carry the entity audit (`privacy.entity_audit`), and policies gain `entity_critical_max`, `entity_high_max`, `el_mia_auc_max`, and `el_mia_tpr_at_1pct_fpr_max`.
+- Model directories (Hugging Face checkpoints) are hashed as one artifact, verified file by file, and scanned for unsafe weights.
+- Docker Compose uses SeaweedFS for S3-compatible storage (MinIO images are no longer freely available).
+
 ## 0.2.0
 
 Works on any tabular dataset, and is ready to install without cloning the repository.

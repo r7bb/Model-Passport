@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from model_passport.core import identity
 from model_passport.core.schema import (
+    EntityAuditResult,
     Passport,
     PolicyResult,
     ReidentificationResult,
@@ -141,6 +142,30 @@ def _cves(severity: Severity) -> Callable[[Passport], int | None]:
     return count
 
 
+def _entity_audit(p: Passport) -> EntityAuditResult | None:
+    return p.privacy_report.entity_audit if p.privacy_report else None
+
+
+def _entities_at(severity: Severity) -> Callable[[Passport], int | None]:
+    """Entities rated exactly ``severity`` by the entity-level audit."""
+
+    def count(p: Passport) -> int | None:
+        audit = _entity_audit(p)
+        return Missing if audit is None else audit.severity_counts.get(severity.value, 0)
+
+    return count
+
+
+def _entity_auc(p: Passport) -> float | None:
+    audit = _entity_audit(p)
+    return Missing if audit is None else audit.auc
+
+
+def _entity_tpr(p: Passport) -> float | None:
+    audit = _entity_audit(p)
+    return Missing if audit is None else audit.tpr_at_fpr.get("0.01")
+
+
 # --- Rules ---------------------------------------------------------------------------------
 
 
@@ -155,6 +180,7 @@ class Rule:
 QUASI_HINT = "no quasi-identifiers found; list them under privacy.quasi_identifiers"
 SENSITIVE_HINT = "set privacy.sensitive_column"
 LEAKAGE_HINT = "set audit.label_column and declare train and test datasets"
+ENTITY_HINT = "run `passport llm audit` and set privacy.entity_audit"
 
 
 RULES: dict[str, Rule] = {
@@ -176,6 +202,16 @@ RULES: dict[str, Rule] = {
     "secrets_found_max": Rule(_secrets, "max", "confirmed secrets in data and scripts"),
     "unsafe_pickle": Rule(_unsafe_pickles, "flag", "pickle files with dangerous imports"),
     "critical_cves_max": Rule(_cves(Severity.CRITICAL), "max", "critical dependency CVEs"),
+    "entity_critical_max": Rule(
+        _entities_at(Severity.CRITICAL), "max", "critical memorized entities", ENTITY_HINT
+    ),
+    "entity_high_max": Rule(
+        _entities_at(Severity.HIGH), "max", "high-risk memorized entities", ENTITY_HINT
+    ),
+    "el_mia_auc_max": Rule(_entity_auc, "max", "entity-level attack AUC", ENTITY_HINT),
+    "el_mia_tpr_at_1pct_fpr_max": Rule(
+        _entity_tpr, "max", "entity-level attack TPR at 1% FPR", ENTITY_HINT
+    ),
     "high_cves_max": Rule(_cves(Severity.HIGH), "max", "high severity dependency CVEs"),
 }
 

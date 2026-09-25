@@ -214,11 +214,81 @@ class LeakageResult(_Strict):
     gap_metric: str | None = None
 
 
+ENTITY_AUDIT_TAXONOMY = (
+    "OWASP LLM02:2025 Sensitive Information Disclosure",
+    "NIST AI 100-2 E2025 privacy attacks (membership inference, data extraction)",
+)
+
+
+class MethodMetrics(_Strict):
+    """How well one entity-level attack separates trained entities from controls."""
+
+    method: str
+    auc: float
+    tpr_at_fpr: dict[str, float] = Field(
+        default_factory=dict, description="True-positive rate at each false-positive rate."
+    )
+    entity_type: str | None = Field(default=None, description="None for all types together.")
+
+
+class EntityFinding(_Strict):
+    """One sensitive entity in the training data and how strongly the model memorized it.
+
+    ``masked_value`` and ``fingerprint`` identify the entity without storing it; ``record`` and
+    ``span`` locate it in the training data so remediation can act on it.
+    """
+
+    record: str
+    span: tuple[int, int]
+    entity_type: str
+    masked_value: str
+    fingerprint: str | None = Field(default=None, description="Keyed hash of the value.")
+    score: float = Field(description="Primary method's membership score (higher = more likely).")
+    p_value: float = Field(description="Share of same-type controls scoring at least as high.")
+    q_value: float = Field(description="Benjamini-Hochberg adjusted p-value.")
+    likelihood: float = Field(ge=0, le=1)
+    impact: float = Field(ge=0, le=1, description="Harm if this type of value leaks.")
+    risk: float = Field(ge=0, le=10, description="CVSS-style score: 10 x likelihood x impact.")
+    severity: Severity
+    extraction_rate: float | None = Field(
+        default=None, description="Share of sampled completions that reproduced the value."
+    )
+    confirmed: bool | None = Field(
+        default=None, description="High and critical findings are re-tested independently."
+    )
+    exposure: float | None = Field(
+        default=None, description="Confirmation exposure in bits: log2(N + 1) - log2(rank)."
+    )
+    confirmation_p: float | None = None
+
+
+class EntityAuditResult(_Strict):
+    """Entity-level membership inference audit (EL-MIA) of a language model."""
+
+    model: str
+    access: str = Field(description="logprobs (likelihood attacks) or generation (probing).")
+    primary_method: str
+    methods: list[str]
+    references: int
+    entities_audited: int
+    controls: int
+    auc: float | None = Field(default=None, description="Primary method, all entity types.")
+    tpr_at_fpr: dict[str, float] = Field(default_factory=dict)
+    metrics: list[MethodMetrics] = Field(default_factory=list)
+    severity_counts: dict[str, int] = Field(default_factory=dict)
+    findings: list[EntityFinding] = Field(
+        default_factory=list, description="Significant or high-risk entities, riskiest first."
+    )
+    fdr: float = 0.05
+    taxonomy: list[str] = Field(default_factory=lambda: list(ENTITY_AUDIT_TAXONOMY))
+
+
 class PrivacyReport(_Strict):
     datasets_scanned: list[str] = Field(default_factory=list)
     data_findings: list[Finding] = Field(default_factory=list)
     reidentification: list[ReidentificationResult] = Field(default_factory=list)
     leakage: LeakageResult | None = None
+    entity_audit: EntityAuditResult | None = None
 
 
 class DependencyAudit(StrEnum):

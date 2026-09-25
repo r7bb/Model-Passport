@@ -35,6 +35,30 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+DIRECTORY_DOMAIN = b"model-passport:dir:v1\n"
+
+
+def sha256_path(path: Path) -> str:
+    """SHA256 of a file, or a digest of a directory's files.
+
+    A directory (for example a Hugging Face checkpoint) is hashed over its sorted relative
+    paths and file hashes, with a domain prefix so it can never collide with a file hash.
+    Adding, removing, renaming, or editing any file changes the digest.
+    """
+    if not path.is_dir():
+        return sha256_file(path)
+    digest = hashlib.sha256(DIRECTORY_DOMAIN)
+    for file in sorted(p for p in path.rglob("*") if p.is_file()):
+        digest.update(f"{file.relative_to(path).as_posix()}\0{sha256_file(file)}\n".encode())
+    return digest.hexdigest()
+
+
+def path_size(path: Path) -> int:
+    if not path.is_dir():
+        return path.stat().st_size
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
