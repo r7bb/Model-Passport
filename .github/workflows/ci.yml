@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with: { python-version: "3.11" }
-      - run: pip install -e ".[dev,registry,dashboard]"  # mypy checks the dashboard too
+      - run: pip install -e ".[dev,registry,dashboard,platform]"  # mypy checks these too
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
@@ -38,7 +38,7 @@ jobs:
           cache: pip
       # CPU-only PyTorch: the default Linux wheel bundles GPU libraries CI does not need.
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev,demo,registry,dashboard,llm]"
+      - run: pip install -e ".[dev,demo,registry,dashboard,llm,platform]"
       - run: pytest --cov=model_passport --cov-report=term-missing:skip-covered
         env:
           MLFLOW_DISABLE_AGENT_HINT: "1"

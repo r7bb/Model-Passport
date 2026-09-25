@@ -53,6 +53,10 @@ demo = ["faker>=24"]
 # Entity-level audits of language models (Hugging Face, OpenAI-compatible, Anthropic, OpenAI).
 llm = ["torch>=2.4", "transformers>=4.45", "tokenizers>=0.20", "safetensors>=0.4",
        "faker>=24", "httpx>=0.27"]
+# The multi-tenant platform backend (FastAPI, PostgreSQL, S3-compatible storage, workers).
+platform = ["fastapi>=0.110", "uvicorn>=0.29", "sqlalchemy>=2.0", "alembic>=1.13",
+            "psycopg[binary]>=3.2", "pyjwt>=2.9", "argon2-cffi>=23.1", "boto3>=1.35",
+            "python-multipart>=0.0.9", "httpx>=0.27"]
 docs = ["playwright>=1.44"]  # scripts/screenshot.py; then: python -m playwright install chromium
 dev = [
     "pytest>=8",
@@ -67,6 +71,7 @@ dev = [
     "types-PyYAML",
     "pandas-stubs",
     "scipy-stubs",
+    "pgserver>=0.1.4",  # a throwaway PostgreSQL for the row-level security tests
 ]
 
 [project.urls]
@@ -128,6 +133,7 @@ max-args = 8
 "tests/**" = ["S", "PLR0913", "ARG", "PLC0415", "N806"]  # N806: sklearn-style X
 "demo/**" = ["T20", "S301", "N803", "N806"]  # scripts print; own pickle; sklearn-style X
 "scripts/**" = ["T20"]
+"src/model_passport/platform/migrations/**" = ["E501", "S608"]  # generated DDL; fixed SQL
 "src/model_passport/ml/**" = ["N803", "N806"]  # scikit-learn naming: X is the feature matrix
 # Typer commands declare one parameter per CLI option; the count is the interface, not a smell.
 "src/model_passport/cli/**" = ["PLR0913", "PLR0917"]
@@ -144,6 +150,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # Deep-learning libraries are partly typed; treat them as Any rather than half-checked.
-module = ["torch.*", "transformers.*", "tokenizers.*", "safetensors.*", "faker.*"]
+module = ["torch.*", "transformers.*", "tokenizers.*", "safetensors.*", "faker.*", "boto3.*",
+          "botocore.*", "pgserver.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
