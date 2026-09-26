@@ -8,14 +8,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from model_passport.llm import synthetic
 from model_passport.llm.entities import write_corpus
 from model_passport.platform import auditlog, jobs, lifecycle, services
 from model_passport.platform.db import make_engine, migrate, scoped_session, session_factory
-from model_passport.platform.models import Access, JobStatus, Model, Role, State
+from model_passport.platform.models import Access, Job, JobStatus, Model, ModelVersion, Role, State
 from model_passport.platform.rbac import Permission, allowed
 from model_passport.platform.security import (
     DecryptionError,
@@ -219,3 +219,88 @@ def test_postgres_row_level_security_isolates_tenants() -> None:
         s.add(Model(tenant_id=b_id, name="sneaky", access=Access.API, base="x"))
     with engine.connect() as connection:  # no tenant set: nothing is visible
         assert connection.execute(text("SELECT count(*) FROM models")).scalar() == 0
+
+
+# --- Settings, storage backends, and worker failures ---------------------------------------------
+
+
+def test_settings_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from model_passport.platform.settings import Settings, SettingsError, decode_key, new_key
+
+    monkeypatch.setenv("MP_JWT_SECRET", "short")
+    with pytest.raises(SettingsError, match="MP_JWT_SECRET"):
+        Settings.from_env()
+    monkeypatch.setenv("MP_JWT_SECRET", "j" * 40)
+    monkeypatch.delenv("MP_MASTER_KEY", raising=False)
+    with pytest.raises(SettingsError, match="MP_MASTER_KEY"):
+        Settings.from_env()
+    monkeypatch.setenv("MP_MASTER_KEY", new_key())
+    monkeypatch.setenv("MP_BASE_DOMAIN", "mp.example.com")
+    settings = Settings.from_env()
+    assert settings.base_domain == "mp.example.com"
+    assert len(settings.master_key) == 32
+    with pytest.raises(SettingsError, match="base64"):
+        decode_key("not base64!!")
+    with pytest.raises(SettingsError, match="32 bytes"):
+        decode_key("c2hvcnQ=")
+
+
+def test_store_urls_and_s3_backend(tmp_path: Path) -> None:
+    from model_passport.platform.storage import S3Store, open_store
+
+    assert isinstance(open_store(f"file://{tmp_path}"), LocalStore)
+    with pytest.raises(StorageError, match="unsupported"):
+        open_store("ftp://host/bucket")
+
+    class FakeS3:
+        def __init__(self) -> None:
+            self.objects: dict[str, bytes] = {}
+
+        def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803
+            self.objects[f"{Bucket}/{Key}"] = Body
+
+        def get_object(self, Bucket: str, Key: str) -> dict[str, object]:  # noqa: N803
+            import io
+
+            return {"Body": io.BytesIO(self.objects[f"{Bucket}/{Key}"])}
+
+        def delete_object(self, Bucket: str, Key: str) -> None:  # noqa: N803
+            self.objects.pop(f"{Bucket}/{Key}", None)
+
+    store = S3Store("mp-data", endpoint="http://seaweedfs:8333")
+    store.client = FakeS3()
+    tenant = TenantStore(store, "t1", os.urandom(32))
+    tenant.put("reports/a.json", b"{}")
+    assert tenant.get("reports/a.json") == b"{}"
+    tenant.delete("reports/a.json")
+    with pytest.raises(StorageError, match="not found"):
+        tenant.get("reports/a.json")
+
+
+def test_failed_jobs_return_versions_to_an_actionable_state(
+    session: Session, tmp_path: Path
+) -> None:
+    from model_passport.platform.db import make_engine, migrate, session_factory
+    from model_passport.platform.worker import WorkerContext, run_once
+
+    engine = make_engine(f"sqlite:///{tmp_path}/w.db")
+    migrate(engine)
+    factory = session_factory(engine)
+    with scoped_session(factory, "*") as s:
+        _, model, _ = _tenant_with_model(s, tmp_path)
+        version = model.versions[0]
+        lifecycle.move(s, version, State.AUDITING, lifecycle.Who(ADMIN, Role.ML_ENGINEER))
+        # A tiny base model with no trained checkpoint cannot be audited: the job must fail.
+        model.base = "tiny"
+        jobs.enqueue(s, version.tenant_id, "audit", {"version": version.id}, ADMIN, max_attempts=1)
+        version_id = version.id
+    context = WorkerContext(
+        factory=factory, store=LocalStore(tmp_path / "objects"), master_key=MASTER
+    )
+    assert run_once(context) is True
+    assert run_once(context) is False  # queue empty
+    with scoped_session(factory, "*") as s:
+        failed = s.get(Job, s.scalars(select(Job)).first().id)  # type: ignore[union-attr]
+        assert failed.status is JobStatus.FAILED
+        assert "must be trained" in (failed.error or "")
+        assert s.get(ModelVersion, version_id).state is State.REGISTERED  # type: ignore[union-attr]

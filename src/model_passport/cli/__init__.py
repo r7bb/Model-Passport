@@ -5,6 +5,7 @@ from model_passport.cli import project  # isort: skip
 from model_passport.cli import ops  # isort: skip
 from model_passport.cli import scan  # isort: skip
 from model_passport.cli import llm  # isort: skip
+from model_passport.cli import platform  # isort: skip
 from model_passport.cli._app import app
 
-__all__ = ["app", "llm", "ops", "project", "scan"]
+__all__ = ["app", "llm", "ops", "platform", "project", "scan"]

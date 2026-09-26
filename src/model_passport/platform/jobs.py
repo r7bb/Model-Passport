@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from model_passport.platform import auditlog
 from model_passport.platform.models import Job, JobStatus, now
 
-KINDS = ("audit", "remediate", "report")
+KINDS = ("train", "audit", "remediate", "report")
 
 
 class JobError(ValueError):

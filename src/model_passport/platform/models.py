@@ -119,6 +119,7 @@ class Tenant(Base):
     plan: Mapped[Plan] = mapped_column(_enum(Plan), default=Plan.FREE)
     status: Mapped[TenantStatus] = mapped_column(_enum(TenantStatus), default=TenantStatus.ACTIVE)
     wrapped_key: Mapped[bytes] = mapped_column(LargeBinary, doc="Tenant data key, wrapped.")
+    public_key: Mapped[str | None] = mapped_column(Text, doc="Ed25519 key signing attestations.")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -210,6 +211,8 @@ class ModelVersion(Base):
     critical: Mapped[int] = mapped_column(Integer, default=0)
     high: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(Text, default="")
+    attestation: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    attestation_sha256: Mapped[str | None] = mapped_column(String(64))
     created_by: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

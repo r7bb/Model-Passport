@@ -4,7 +4,7 @@ MP (Model Passport) is an entity-level PII leakage auditing and remediation plat
 
 ## Where things stand
 
-The passport engine (phases 1–7) and platform phases A and B are done: 235 tests, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phase C is under way (see "Phase C progress" below); phases D–G follow.
+The passport engine (phases 1–7) and platform phases A–C are done: 242 tests, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phases D–G are next.
 
 | Phase | What it delivers |
 |---|---|
@@ -46,29 +46,22 @@ Decisions: build all modules; audit open-weight and API models from the start; r
 |---|---|---|
 | A. Entity audit engine (**done**) | Find sensitive entities in training text. Score each one's memorization with the EL-MIA methods (loss, zlib, min-k%, ReCaLL, and the reference-set attacks). Report per-entity risk with false-discovery control and AUC / TPR at low FPR. Works with Hugging Face models, OpenAI-compatible servers with log-probs, and extraction probing for API-only models. | M5 |
 | B. Remediation (**done**) | Sanitize risky entities (surrogate, mask, or drop), fine-tune again from the base checkpoint, re-audit, and link the new version to the old one in a signed passport | M6, M7 |
-| C. Backend (**in progress**) | FastAPI with PostgreSQL: tenants, 7 roles, RBAC, append-only audit log, per-tenant encrypted object storage, job queue and Python workers, provenance and diligence reports | M2, M3, M4, M9 |
+| C. Backend (**done**) | FastAPI with PostgreSQL: tenants, 7 roles, RBAC, append-only audit log, per-tenant encrypted object storage, job queue and Python workers, provenance and diligence reports | M2, M3, M4, M9 |
 | D. Control plane | Go control plane (orchestration, deploy, rollback, kill switch) over gRPC, API gateway (subdomain → tenant, login check), and the `mp` CLI | M7, M8 |
 | E. Web app | Next.js super-admin console and tenant dashboard for every module | M1–M9 |
 | F. Release flow | Canary release to developer endpoints, verification (re-audit, canary testers, Claude/GPT probing), approval, consumer release, monitoring, rollback, kill switch | M8 |
 | G. Infrastructure | Dockerfiles for every service, Docker Compose, Helm chart for Kubernetes, and Terraform for the cloud (network, cluster, database, encrypted storage) | |
 
-## Phase C progress
+## Phase C: what the backend includes
 
-Done (`model_passport.platform`, with tests):
-- **Data model and migrations:** tenants, users, memberships, datasets, models, versions, approvals, deployments, test reports, jobs, and the audit log. Migrations use Alembic.
-- **Isolation:** PostgreSQL row-level security on every tenant table, forced and verified with a non-superuser role.
-- **Audit log:** append-only (UPDATE and DELETE rejected by triggers) and hash-chained.
-- **Security:** the seven roles and their permissions, Argon2id passwords, JWT sessions, and per-tenant AES-256-GCM envelope encryption.
-- **Storage:** encrypted object storage (a local folder or S3/SeaweedFS).
-- **Lifecycle:** the product flow as a role-checked state machine, including the kill switch.
-- **Jobs:** a queue claimed with `SKIP LOCKED`, with retries.
-- **Services:** tenants, members, datasets with provenance and consent, models, and versions with lineage.
-
-Next in phase C:
-1. The FastAPI app and routers for each module (M1–M4, M9), with tenant resolution from the subdomain or a gateway header.
-2. The worker: audit jobs (run the entity audit, gate, and move the version to findings or clean), remediation jobs (sanitize, retrain, register the next version), and report jobs.
-3. Signed attestations per version, and the diligence report for external reviewers.
-4. The `passport platform` CLI: migrate, create a super admin, serve, and run a worker.
+Everything is in `model_passport.platform`, tested end to end over HTTP on SQLite and on PostgreSQL with row-level security:
+- **Organizations and access:** organizations, the seven roles, and a permission check on every request. The organization comes from the subdomain or an `X-MP-Tenant` header.
+- **Data protection:** PostgreSQL row-level security, per-organization encryption of every file, and an append-only, hash-chained audit log.
+- **Lifecycle:** a role-checked state machine: audit, findings, remediation, canary, verification, approval, release, and the kill switch.
+- **Workers:** train, audit (with the release gate and a signed attestation), remediate (sanitize, retrain, next version), and report.
+- **Diligence report:** lineage, provenance and consent, audit results, and approvals, with every signature and the audit chain re-verified.
+- **API:** routes for M1–M4, M5–M7, and M9, plus the super-admin console.
+- **CLI:** `passport platform keygen | migrate | create-superadmin | serve | worker`.
 
 ## Ideas for later
 

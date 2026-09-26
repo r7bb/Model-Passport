@@ -6,16 +6,17 @@ This guide takes you from nothing installed to a signed model passport, step by 
 
 1. [Install](#1-install)
 2. [Audit a language model](#2-audit-a-language-model)
-3. [Run the demo](#3-run-the-demo)
-4. [Use your own data](#4-use-your-own-data)
-5. [Check new data](#5-check-new-data)
-6. [Dashboard and registry](#6-dashboard-and-registry)
-7. [Run everything with Docker](#7-run-everything-with-docker)
-8. [Block unsafe models in CI](#8-block-unsafe-models-in-ci)
-9. [Command reference](#9-command-reference)
-10. [How it works](#10-how-it-works)
-11. [Contributing](#11-contributing)
-12. [Troubleshooting](#12-troubleshooting)
+3. [Run the platform](#3-run-the-platform)
+4. [Run the demo](#4-run-the-demo)
+5. [Use your own data](#5-use-your-own-data)
+6. [Check new data](#6-check-new-data)
+7. [Dashboard and registry](#7-dashboard-and-registry)
+8. [Run everything with Docker](#8-run-everything-with-docker)
+9. [Block unsafe models in CI](#9-block-unsafe-models-in-ci)
+10. [Command reference](#10-command-reference)
+11. [How it works](#11-how-it-works)
+12. [Contributing](#12-contributing)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
@@ -27,7 +28,7 @@ This guide takes you from nothing installed to a signed model passport, step by 
 |---|---|---|
 | Python 3.11 or newer | Model Passport is written in Python | [python.org/downloads](https://www.python.org/downloads/), or `brew install python@3.11` on macOS |
 | Git | To download the code and record which code version trained a model | [git-scm.com](https://git-scm.com/downloads) |
-| Docker (optional) | Only for [section 7](#7-run-everything-with-docker) | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| Docker (optional) | Only for [section 8](#8-run-everything-with-docker) | [docker.com](https://www.docker.com/products/docker-desktop/) |
 
 Check your Python version. It must print 3.11 or higher:
 
@@ -174,11 +175,86 @@ rules:
 
 `passport init --llm` writes this policy for you.
 
-How the tests work is explained in [section 10](#how-language-models-are-audited).
+How the tests work is explained in [section 11](#how-language-models-are-audited).
 
 ---
 
-## 3. Run the demo
+## 3. Run the platform
+
+The platform is the multi-organization service from the product flow. Organizations each get their own subdomain (`usps.mp.com`), their own users and roles, their own encryption key, and data no other organization can see. Install it with the `platform` extra:
+
+```bash
+pip install "model-passport[platform,llm] @ git+https://github.com/r7bb/Model-Passport"
+```
+
+### Start it
+
+```bash
+passport platform keygen                   # prints MP_MASTER_KEY and MP_JWT_SECRET; keep them secret
+export MP_MASTER_KEY=... MP_JWT_SECRET=...
+export MP_DATABASE_URL=postgresql+psycopg://mp_app:password@localhost/mp   # SQLite works locally
+export MP_STORAGE=s3://mp-data MP_S3_ENDPOINT=http://localhost:8333        # or file:///var/lib/mp
+export MP_BASE_DOMAIN=mp.example.com
+
+passport platform migrate                  # create or upgrade the database
+passport platform create-superadmin --email you@example.com
+passport platform serve --host 0.0.0.0     # the API, with docs at http://localhost:8080/docs
+passport platform worker                   # run one or more; they share the job queue
+```
+
+### Who can do what
+
+| Role | Can |
+|---|---|
+| Super admin | Create organizations, change their plan, suspend them |
+| Org admin | Manage members and roles, approve and release versions, use the kill switch |
+| ML engineer | Upload data, register models and versions, start audits and remediation, deploy to developer endpoints |
+| Compliance auditor | Review findings, approve or reject versions, use the kill switch |
+| Canary tester | Test developer endpoints and report leaks |
+| End consumer | Use released models |
+| External reviewer | Read the diligence report and data provenance |
+
+### A walk through the API
+
+Every organization request carries a token and the organization, either through its subdomain or the `X-MP-Tenant` header:
+
+```bash
+TOKEN=$(curl -s localhost:8080/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"eng@usps.example","password":"..."}' | jq -r .access_token)
+H=(-H "Authorization: Bearer $TOKEN" -H "X-MP-Tenant: usps")
+
+curl "${H[@]}" localhost:8080/api/v1/datasets -F file=@tickets.jsonl -F name=tickets \
+  -F source="helpdesk export" -F license=internal -F consent=obtained
+curl "${H[@]}" localhost:8080/api/v1/models -H 'content-type: application/json' \
+  -d '{"name":"assistant","access":"open-weight","base":"hf:EleutherAI/pythia-160m"}'
+curl "${H[@]}" localhost:8080/api/v1/models/<model id>/versions -H 'content-type: application/json' \
+  -d '{"version":"1.0.0","dataset_id":"<id>","reference_dataset_id":"<id>","train":true}'
+```
+
+The worker then trains and audits the version. The version moves to `findings` or `clean`, and gets a signed attestation. Next steps follow the product flow:
+
+| Step | Request | Who |
+|---|---|---|
+| See what leaked | `GET /versions/{id}/findings` | engineer, auditor, admin |
+| Remediate | `POST /versions/{id}/remediate` (sanitize, retrain, re-audit as the next version) | engineer |
+| Canary, then verify | `POST /versions/{id}/transition` with `{"to": "canary"}`, then `"verifying"` | engineer |
+| Approve or reject | `POST /versions/{id}/approvals` with `{"decision": "approve"}` | auditor, admin |
+| Release | `POST /versions/{id}/transition` with `{"to": "released"}` | admin |
+| Kill switch | `POST /versions/{id}/kill` with `{"reason": "..."}` | auditor, admin |
+| Diligence report | `GET /models/{id}/diligence` (add `?format=html` for a page) | reviewer, auditor, admin |
+
+The rest of the dashboard modules are `GET /dashboard` (M1), `/members` (M2), `/analytics` (M3), `/audit-log` and `/audit-log/verify` (M4), and `/jobs` (M7). The full, interactive list is at `/docs`.
+
+### How organizations are kept apart
+
+- **In the database:** PostgreSQL row-level security. Every transaction is limited to one organization, so even a query that forgets its filter cannot read another organization's rows. A session with no organization set sees nothing.
+- **In storage:** every file (datasets, models, reports) is encrypted with the organization's own AES-256 key. That key is stored only encrypted by the platform master key, and a file copied into another organization's folder will not decrypt.
+- **In the audit log:** every action is recorded in an append-only log. Each entry is hash-chained to the one before, and the database rejects edits and deletions. `GET /audit-log/verify` rechecks the whole chain.
+- **In the reports:** each version's attestation is signed with the organization's Ed25519 key. The diligence report re-verifies every signature and the audit chain when it is generated.
+
+---
+
+## 4. Run the demo
 
 The demo trains a model that predicts income from made-up census-style records. The data includes fake names, emails, and phone numbers so the checks have something to find. No real people are involved.
 
@@ -240,7 +316,7 @@ passport run && passport build   # rebuild to get back to a clean state
 
 ---
 
-## 4. Use your own data
+## 5. Use your own data
 
 ### The quick way: a data file and a label
 
@@ -340,7 +416,7 @@ Use `--no-link` to start a fresh history instead.
 
 ---
 
-## 5. Check new data
+## 6. Check new data
 
 When new data arrives, check whether it still looks like the training data:
 
@@ -370,7 +446,7 @@ Tuning options: `--alpha` (significance level, default 0.01), `--psi-threshold` 
 
 ---
 
-## 6. Dashboard and registry
+## 7. Dashboard and registry
 
 ### Dashboard on your own machine
 
@@ -400,7 +476,7 @@ To require a password (bearer token) for uploads, set `PASSPORT_REGISTRY_TOKEN` 
 
 ---
 
-## 7. Run everything with Docker
+## 8. Run everything with Docker
 
 Docker starts the dashboard, the registry, MLflow, and SeaweedFS (S3-compatible file storage for MLflow) together, with nothing else to install:
 
@@ -420,7 +496,7 @@ To log runs to MLflow, set `tracking.mlflow_uri: http://localhost:5000` in `pass
 
 ---
 
-## 8. Block unsafe models in CI
+## 9. Block unsafe models in CI
 
 Use the Model Passport GitHub Action. It runs your pipeline, builds and verifies the passport, and uploads it with its report. The job fails when the verdict is FAIL, and the job summary lists every rule:
 
@@ -449,7 +525,7 @@ Outputs: `verdict` and `passport-id`. Other CI systems can run the same commands
 
 ---
 
-## 9. Command reference
+## 10. Command reference
 
 Run `passport <command> --help` for every option.
 
@@ -475,11 +551,12 @@ Run `passport <command> --help` for every option.
 | `passport llm demo-corpus` | Writes a made-up corpus for trying things out |
 | `passport init --llm --corpus <file> [--base hf:<id>]` | Sets up a language model project |
 | `passport llm remediate` | Tests, sanitizes, retrains, and re-tests until the release gate passes |
+| `passport platform keygen / migrate / create-superadmin / serve / worker` | Run the multi-organization platform |
 | `passport push` | Uploads a passport to a registry |
 
 ---
 
-## 10. How it works
+## 11. How it works
 
 ### How language models are audited
 
@@ -559,13 +636,13 @@ On an 800-row file with 4 quasi-identifiers, this reaches k-anonymity without re
 
 ---
 
-## 11. Contributing
+## 12. Contributing
 
 ```bash
 pip install -e ".[dev,demo,registry,dashboard]"
 pre-commit install                 # runs lint, type checks, and a secrets scan on every commit
 
-pytest                             # about 230 tests, 88% coverage
+pytest                             # about 240 tests, 89% coverage
 ruff check . && ruff format --check .
 mypy                               # strict mode
 ```
@@ -595,7 +672,7 @@ python scripts/terminal_shot.py --help
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -603,7 +680,7 @@ python scripts/terminal_shot.py --help
 | `python3 --version` shows 3.9 or 3.10 | Install Python 3.11+, then create the environment with it: `python3.11 -m venv .venv` |
 | `passport init` says "kept existing" | That's expected: it never overwrites your config or key. `--force` replaces both, but older passports then need the old public key to verify. |
 | `verify` reports a changed file you didn't mean to change | Rerun `passport run && passport build` to certify the current files |
-| `monitor drift` reports schema problems | Prepare the batch first: `passport prepare <batch>` (see [section 5](#5-check-new-data)) |
+| `monitor drift` reports schema problems | Prepare the batch first: `passport prepare <batch>` (see [section 6](#6-check-new-data)) |
 | A stage stops with "label ... has 1 distinct value" or "only N usable rows" | The data can't train a model yet: check the label column and collect more rows |
 | The train stage says "no candidate had a gap within 0.05" | Every model overfits, usually because the data is small. Add rows, or raise `max_gap` knowing the privacy gate may warn |
 | k-anonymity shows "not evaluated: no quasi-identifiers found" | List the columns that could identify a person under `privacy.quasi_identifiers` in `passport.yaml`, or ignore the warning if there are none |

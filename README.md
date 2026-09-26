@@ -79,10 +79,11 @@ The passport also covers tabular models, with a readable report and a dashboard:
 | Ready now | Being built |
 |---|---|
 | Memorization testing of language models, for open models and API models | The web app: a console for administrators, and a dashboard for each organization |
-| Risk scores and a release gate based on industry practice | Organizations with separate data, and roles (admin, engineer, auditor, tester, reviewer) |
-| Cleaning risky details and retraining | Test endpoints, approvals, release, rollback, and a kill switch |
-| Signed passports, version history, and tamper checks | Reports for investors and buyers (due diligence) |
-| Checks for tabular models and datasets, drift monitoring, and a GitHub Action | Cloud deployment (Kubernetes, Terraform) |
+| Cleaning risky details and retraining, until the release gate passes | Test endpoints for canary testers, live monitoring, and rollback |
+| A service for many organizations, each with its own login, roles, and encryption key, and data no other organization can see | The command-line tool `mp` and the control plane that deploys models |
+| Roles from administrator to outside reviewer, approvals, release, and a kill switch | Cloud deployment (Kubernetes, Terraform) |
+| A tamper-proof activity log, signed records for every version, and a report for investors and buyers | |
+| Checks for tabular models and datasets, drift monitoring, and a GitHub Action | |
 
 See [ROADMAP.md](https://github.com/r7bb/Model-Passport/blob/main/ROADMAP.md) for the full plan.
 

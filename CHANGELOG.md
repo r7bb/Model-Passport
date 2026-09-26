@@ -9,7 +9,7 @@ MP becomes an entity-level PII leakage auditing and remediation platform (phase 
 - `passport llm sanitize` (surrogate, mask, or drop) and `passport llm finetune` (safetensors) for the remediation loop; `passport llm demo-corpus` for synthetic data.
 - `passport init --llm` and `passport llm remediate` (phase B): a project that tests, sanitizes, retrains, and re-tests as new signed versions (1.0.0 → 1.1.0 → ...) until the release gate passes. Remediation escalates from single values to whole types when a type keeps leaking.
 - The release gate for language models blocks confirmed High and Critical findings.
-- Platform backend foundations (phase C, in progress): tenants, the seven roles, PostgreSQL row-level security, an append-only hash-chained audit log, per-tenant encrypted storage, the lifecycle state machine with a kill switch, a job queue, and Alembic migrations.
+- The platform backend (phase C): the API for every module except M8, workers (train, audit, remediate, report), signed per-version attestations, the diligence report, and `passport platform` commands. Its foundations: tenants, the seven roles, PostgreSQL row-level security, an append-only hash-chained audit log, per-tenant encrypted storage, the lifecycle state machine with a kill switch, a job queue, and Alembic migrations.
 - Passports can carry the entity audit (`privacy.entity_audit`), and policies gain `entity_critical_max`, `entity_high_max`, `el_mia_auc_max`, and `el_mia_tpr_at_1pct_fpr_max`.
 - Model directories (Hugging Face checkpoints) are hashed as one artifact, verified file by file, and scanned for unsafe weights.
 - Docker Compose uses SeaweedFS for S3-compatible storage (MinIO images are no longer freely available).
