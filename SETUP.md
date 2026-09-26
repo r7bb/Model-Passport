@@ -245,6 +245,34 @@ The worker then trains and audits the version. The version moves to `findings` o
 
 The rest of the dashboard modules are `GET /dashboard` (M1), `/members` (M2), `/analytics` (M3), `/audit-log` and `/audit-log/verify` (M4), and `/jobs` (M7). The full, interactive list is at `/docs`.
 
+### The control plane, gateway, and `mp` CLI
+
+Three Go programs, in `controlplane/`, complete the platform. They need Go 1.26 or newer to build:
+
+```bash
+cd controlplane
+go build -o bin/ ./cmd/...        # mp-controlplane, mp-gateway, mp
+```
+
+| Program | What it does | Settings |
+|---|---|---|
+| `mp-controlplane` | Decides which version serves where. Handles deploy to developer endpoints or consumers, rollback, and the kill switch, over gRPC. It checks the same roles as the backend and writes to the same audit log. | `MP_DATABASE_URL`, `MP_JWT_SECRET`, `MP_CONTROLPLANE_ADDR` (default `:9090`) |
+| `mp-gateway` | The front door. Turns `usps.mp.com` into the organization, removes any organization header a client sends, checks the login before anything reaches the backend, and refuses killed models. | `MP_BACKEND_URL`, `MP_CONTROLPLANE_ADDR`, `MP_BASE_DOMAIN`, `MP_JWT_SECRET`, `MP_GATEWAY_ADDR` (default `:8000`) |
+| `mp` | A command-line tool for deployments | `MP_ORG`, `MP_CONTROLPLANE` |
+
+Set `MP_CONTROLPLANE_ADDR` for the backend too. Moving a version to `canary` then deploys it to developer endpoints, and `released` deploys it to consumers. `POST /models/{id}/rollback` and `GET /deployments` become available, and the kill switch stops every live deployment at once.
+
+```bash
+mp login --api https://usps.mp.example.com --email you@usps.example
+export MP_ORG=usps MP_CONTROLPLANE=controlplane.internal:9090
+mp status
+mp deploy --version <id> --env dev
+mp rollback --model <id>
+mp kill --version <id> --reason "customer data in a reply"
+```
+
+A developer deploy needs a clean, canary, or verifying version, and a consumer deploy needs an approved one. Nothing deploys a killed version. After a change to `controlplane/proto`, run `scripts/gen_proto.sh` to regenerate the Go and Python code.
+
 ### How organizations are kept apart
 
 - **In the database:** PostgreSQL row-level security. Every transaction is limited to one organization, so even a query that forgets its filter cannot read another organization's rows. A session with no organization set sees nothing.
@@ -552,6 +580,7 @@ Run `passport <command> --help` for every option.
 | `passport init --llm --corpus <file> [--base hf:<id>]` | Sets up a language model project |
 | `passport llm remediate` | Tests, sanitizes, retrains, and re-tests until the release gate passes |
 | `passport platform keygen / migrate / create-superadmin / serve / worker` | Run the multi-organization platform |
+| `mp status / deploy / rollback / kill` | Deployments and the kill switch, through the control plane |
 | `passport push` | Uploads a passport to a registry |
 
 ---

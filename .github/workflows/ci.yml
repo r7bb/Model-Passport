@@ -24,6 +24,24 @@ jobs:
       - run: ruff format --check .
       - run: mypy
 
+  go:
+    # The control plane, gateway, and mp CLI (controlplane/).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: controlplane
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: controlplane/go.mod
+          cache-dependency-path: controlplane/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./cmd/...
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -36,6 +54,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+      - uses: actions/setup-go@v6  # the control plane integration tests build the Go binary
+        with:
+          go-version-file: controlplane/go.mod
+          cache-dependency-path: controlplane/go.sum
       # CPU-only PyTorch: the default Linux wheel bundles GPU libraries CI does not need.
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: pip install -e ".[dev,demo,registry,dashboard,llm,platform]"

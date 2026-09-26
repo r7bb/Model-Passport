@@ -33,6 +33,7 @@ from model_passport.platform.api.schemas import (
     VersionIn,
     VersionOut,
 )
+from model_passport.platform.controlplane import ControlPlane, ControlPlaneError
 from model_passport.platform.models import (
     Approval,
     AuditEvent,
@@ -73,6 +74,33 @@ def _dataset(c: Ctx, dataset_id: str) -> Dataset:
         return services.get(c.session, Dataset, c.tenant.id, dataset_id)
     except services.NotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+CONTROLPLANE_HTTP = {"PERMISSION_DENIED": 403, "FAILED_PRECONDITION": 409, "NOT_FOUND": 404,
+                     "UNAUTHENTICATED": 401, "INVALID_ARGUMENT": 400}  # fmt: skip
+DEPLOYS = {State.CANARY: "dev", State.RELEASED: "consumer"}
+
+
+def _controlplane(c: Ctx) -> ControlPlane:
+    plane = c.controlplane
+    if plane is None:
+        raise HTTPException(501, "no control plane is configured (set MP_CONTROLPLANE_ADDR)")
+    return plane
+
+
+def _deploy_first(c: Ctx, version: ModelVersion, to: State) -> None:
+    """Deploy through the control plane before the state change is written.
+
+    The control plane locks the version row; calling it after this request has written the
+    row would deadlock, so the deployment comes first and the state change second.
+    """
+    plane, environment = c.controlplane, DEPLOYS.get(to)
+    if plane is None or environment is None:
+        return
+    try:
+        plane.deploy(version.id, environment)
+    except ControlPlaneError as exc:
+        raise HTTPException(CONTROLPLANE_HTTP.get(exc.code, 502), str(exc)) from exc
 
 
 def _move(c: Ctx, version: ModelVersion, to: State, reason: str) -> None:
@@ -386,8 +414,16 @@ def start_remediation(version_id: str, c: Annotated[Ctx, ctx(P.REMEDIATION_RUN)]
 def transition(
     version_id: str, body: TransitionIn, c: Annotated[Ctx, ctx(P.MODELS_READ)]
 ) -> ModelVersion:
-    """Any lifecycle step the caller's role allows (the lifecycle checks the permission)."""
+    """Any lifecycle step the caller's role allows (the lifecycle checks the permission).
+
+    With a control plane, ``canary`` deploys to developer endpoints and ``released`` to consumers.
+    """
     version = _version(c, version_id)
+    try:
+        lifecycle.check(version, body.to, c.who)  # same answer with or without a control plane
+    except lifecycle.TransitionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    _deploy_first(c, version, body.to)
     _move(c, version, body.to, body.reason)
     return version
 
@@ -422,10 +458,39 @@ def decide(
 
 @router.post("/versions/{version_id}/kill", response_model=VersionOut, tags=["M1 dashboard"])
 def kill(version_id: str, body: KillIn, c: Annotated[Ctx, ctx(P.KILL_SWITCH)]) -> ModelVersion:
-    """The kill switch: block this version everywhere, immediately."""
+    """The kill switch: block this version everywhere, immediately.
+
+    With a control plane, every live deployment of the version stops at the same moment.
+    """
     version = _version(c, version_id)
-    _move(c, version, State.KILLED, body.reason)
+    plane = c.controlplane
+    if plane is None:
+        _move(c, version, State.KILLED, body.reason)
+        return version
+    try:
+        plane.kill(version.id, body.reason)
+    except ControlPlaneError as exc:
+        raise HTTPException(CONTROLPLANE_HTTP.get(exc.code, 502), str(exc)) from exc
+    c.session.refresh(version)
     return version
+
+
+@router.post("/models/{model_id}/rollback", tags=["M8 dev endpoints & testing"])
+def rollback(model_id: str, c: Annotated[Ctx, ctx(P.RELEASES_MANAGE)]) -> dict[str, Any]:
+    """Retire the live consumer version and bring back the previous release."""
+    try:
+        return _controlplane(c).rollback(_model(c, model_id).id)
+    except ControlPlaneError as exc:
+        raise HTTPException(CONTROLPLANE_HTTP.get(exc.code, 502), str(exc)) from exc
+
+
+@router.get("/deployments", tags=["M8 dev endpoints & testing"])
+def deployments(c: Annotated[Ctx, ctx(P.MODELS_READ)], model_id: str = "") -> list[dict[str, Any]]:
+    """What serves where: developer endpoints and consumer releases."""
+    try:
+        return _controlplane(c).deployments(model_id)
+    except ControlPlaneError as exc:
+        raise HTTPException(CONTROLPLANE_HTTP.get(exc.code, 502), str(exc)) from exc
 
 
 @router.post(

@@ -1,0 +1,80 @@
+// The MP control plane: which model version serves where, rollback, and the kill switch.
+//
+// Every call carries the caller's session token ("authorization: Bearer <jwt>") and the
+// organization ("x-mp-tenant: <slug>") as gRPC metadata. The control plane checks the caller's
+// role in that organization and records every change in the organization's audit log.
+syntax = "proto3";
+
+package mp.controlplane.v1;
+
+option go_package = "github.com/r7bb/Model-Passport/controlplane/gen/mp/controlplane/v1;controlplanev1";
+
+service ControlPlane {
+  // Serve a version on developer endpoints (canary) or to consumers (release).
+  rpc Deploy(DeployRequest) returns (Deployment);
+  // Stop the current consumer deployment and bring back the one before it.
+  rpc Rollback(RollbackRequest) returns (Deployment);
+  // The kill switch: stop every deployment of a version and block it everywhere.
+  rpc Kill(KillRequest) returns (KillResponse);
+  rpc ListDeployments(ListDeploymentsRequest) returns (ListDeploymentsResponse);
+  // Used by the gateway: what serves a model in an environment, and is it blocked?
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+}
+
+enum Environment {
+  ENVIRONMENT_UNSPECIFIED = 0;
+  DEV = 1;       // developer endpoints for canary testers
+  CONSUMER = 2;  // live, for end consumers
+}
+
+message Deployment {
+  string id = 1;
+  string version_id = 2;
+  string model_id = 3;
+  string model = 4;
+  string version = 5;
+  Environment environment = 6;
+  string status = 7;  // active | rolled_back | killed
+  string endpoint = 8;
+  string created_at = 9;
+}
+
+message DeployRequest {
+  string version_id = 1;
+  Environment environment = 2;
+}
+
+message RollbackRequest {
+  string model_id = 1;
+}
+
+message KillRequest {
+  string version_id = 1;
+  string reason = 2;
+}
+
+message KillResponse {
+  int32 deployments_stopped = 1;
+  string version_state = 2;
+}
+
+message ListDeploymentsRequest {
+  string model_id = 1;  // empty for all models
+}
+
+message ListDeploymentsResponse {
+  repeated Deployment deployments = 1;
+}
+
+message ResolveRequest {
+  string model = 1;  // model name
+  Environment environment = 2;
+}
+
+message ResolveResponse {
+  bool found = 1;
+  bool killed = 2;
+  string version_id = 3;
+  string version = 4;
+  string endpoint = 5;
+}

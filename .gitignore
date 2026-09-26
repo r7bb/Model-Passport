@@ -28,3 +28,6 @@ mlflow.db
 .coverage
 coverage.xml
 htmlcov/
+
+# Go build output
+controlplane/bin/

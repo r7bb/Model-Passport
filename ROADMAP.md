@@ -4,7 +4,7 @@ MP (Model Passport) is an entity-level PII leakage auditing and remediation plat
 
 ## Where things stand
 
-The passport engine (phases 1–7) and platform phases A–C are done: 242 tests, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phases D–G are next.
+The passport engine (phases 1–7) and platform phases A–D are done: 246 Python tests plus Go tests, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phases E–G are next.
 
 | Phase | What it delivers |
 |---|---|
@@ -47,7 +47,7 @@ Decisions: build all modules; audit open-weight and API models from the start; r
 | A. Entity audit engine (**done**) | Find sensitive entities in training text. Score each one's memorization with the EL-MIA methods (loss, zlib, min-k%, ReCaLL, and the reference-set attacks). Report per-entity risk with false-discovery control and AUC / TPR at low FPR. Works with Hugging Face models, OpenAI-compatible servers with log-probs, and extraction probing for API-only models. | M5 |
 | B. Remediation (**done**) | Sanitize risky entities (surrogate, mask, or drop), fine-tune again from the base checkpoint, re-audit, and link the new version to the old one in a signed passport | M6, M7 |
 | C. Backend (**done**) | FastAPI with PostgreSQL: tenants, 7 roles, RBAC, append-only audit log, per-tenant encrypted object storage, job queue and Python workers, provenance and diligence reports | M2, M3, M4, M9 |
-| D. Control plane | Go control plane (orchestration, deploy, rollback, kill switch) over gRPC, API gateway (subdomain → tenant, login check), and the `mp` CLI | M7, M8 |
+| D. Control plane (**done**) | Go control plane (orchestration, deploy, rollback, kill switch) over gRPC, API gateway (subdomain → tenant, login check), and the `mp` CLI | M7, M8 |
 | E. Web app | Next.js super-admin console and tenant dashboard for every module | M1–M9 |
 | F. Release flow | Canary release to developer endpoints, verification (re-audit, canary testers, Claude/GPT probing), approval, consumer release, monitoring, rollback, kill switch | M8 |
 | G. Infrastructure | Dockerfiles for every service, Docker Compose, Helm chart for Kubernetes, and Terraform for the cloud (network, cluster, database, encrypted storage) | |
@@ -62,6 +62,15 @@ Everything is in `model_passport.platform`, tested end to end over HTTP on SQLit
 - **Diligence report:** lineage, provenance and consent, audit results, and approvals, with every signature and the audit chain re-verified.
 - **API:** routes for M1–M4, M5–M7, and M9, plus the super-admin console.
 - **CLI:** `passport platform keygen | migrate | create-superadmin | serve | worker`.
+
+## Phase D: the control plane
+
+`controlplane/` (Go):
+- **`mp-controlplane`:** a gRPC service for deploy, rollback, the kill switch, listing deployments, and resolving which version serves a model. It uses the backend's roles and lifecycle rules and PostgreSQL row-level security, and appends to the same hash-chained audit log. The event hash matches Python byte for byte.
+- **`mp-gateway`:** subdomain → organization. It strips any client-supplied organization header, checks the login at the edge, and blocks killed models.
+- **`mp`:** the CLI for login, status, deploy, rollback, and kill.
+
+The backend calls the control plane for canary, release, rollback, and kill. Integration tests build the Go binary, run it against PostgreSQL, and verify the shared audit chain from Python.
 
 ## Ideas for later
 

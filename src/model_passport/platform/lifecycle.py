@@ -67,8 +67,8 @@ def next_states(state: State) -> list[State]:
     return sorted({to for (frm, to) in TRANSITIONS if frm is state}, key=lambda s: s.value)
 
 
-def move(session: Session, version: ModelVersion, to: State, who: Who, reason: str = "") -> None:
-    """Change ``version`` to ``to`` if the lifecycle and the actor's role allow it."""
+def check(version: ModelVersion, to: State, who: Who) -> None:
+    """Raise ``TransitionError`` unless ``who`` may move ``version`` to ``to`` now."""
     key = (version.state, to)
     if key not in TRANSITIONS:
         raise TransitionError(f"{version.state.value} -> {to.value} is not a lifecycle step")
@@ -78,6 +78,11 @@ def move(session: Session, version: ModelVersion, to: State, who: Who, reason: s
             raise TransitionError(f"{to.value} is set by the platform after a job, not by hand")
     elif not who.system and not allowed(who.role, needed, who.super_admin):
         raise TransitionError(f"{needed.value} is required for {version.state.value} -> {to.value}")
+
+
+def move(session: Session, version: ModelVersion, to: State, who: Who, reason: str = "") -> None:
+    """Change ``version`` to ``to`` if the lifecycle and the actor's role allow it."""
+    check(version, to, who)
     before = version.state
     version.state = to
     auditlog.record(

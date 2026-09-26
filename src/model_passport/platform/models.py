@@ -106,6 +106,7 @@ class Environment(StrEnum):
 
 class DeploymentStatus(StrEnum):
     ACTIVE = "active"
+    SUPERSEDED = "superseded"  # a newer deployment of the model replaced it
     ROLLED_BACK = "rolled_back"
     KILLED = "killed"
 

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from model_passport.platform import auditlog, lifecycle, services
 from model_passport.platform.api.schemas import MemberIn
+from model_passport.platform.controlplane import ControlPlane
 from model_passport.platform.db import ALL_TENANTS, scoped_session
 from model_passport.platform.models import Membership, Role, Tenant, TenantStatus, User
 from model_passport.platform.rbac import Permission, allowed
@@ -85,6 +86,8 @@ class Ctx:
     tenant: Tenant
     role: Role | None
     files: TenantStore
+    token: str
+    controlplane_addr: str | None
 
     @property
     def actor(self) -> auditlog.Actor:
@@ -96,6 +99,13 @@ class Ctx:
 
     def can(self, permission: Permission) -> bool:
         return allowed(self.role, permission, self.user.is_super_admin)
+
+    @property
+    def controlplane(self) -> ControlPlane | None:
+        """The control plane acting as this caller, or None when none is configured."""
+        if not self.controlplane_addr:
+            return None
+        return ControlPlane(self.controlplane_addr, self.token, self.tenant.slug)
 
 
 def _membership(app: AppState, user: User, slug: str) -> tuple[Tenant, Role | None]:
@@ -123,6 +133,7 @@ def require(permission: Permission) -> Callable[..., Iterator[Ctx]]:
         request: Request,
         app: State,
         user: CurrentUser,
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
         x_mp_tenant: Annotated[str | None, Header()] = None,
     ) -> Iterator[Ctx]:
         slug = tenant_slug(app.settings, request.headers.get("host"), x_mp_tenant)
@@ -134,7 +145,8 @@ def require(permission: Permission) -> Callable[..., Iterator[Ctx]]:
         files = services.tenant_store(app.store, app.settings.master_key, tenant)
         with scoped_session(app.factory, tenant.id) as session:
             session.add(tenant)
-            yield Ctx(session, user, tenant, role, files)
+            token = credentials.credentials if credentials else ""
+            yield Ctx(session, user, tenant, role, files, token, app.settings.controlplane)
 
     return dependency
 
