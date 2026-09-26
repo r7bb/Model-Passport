@@ -39,7 +39,7 @@ from model_passport.llm import methods as m
 from model_passport.llm.backends import GenerationModel, ScoringModel
 from model_passport.llm.confirm import exposure_bits, exposure_rank, reprobe_p
 from model_passport.llm.entities import Record, Span, impact, mask
-from model_passport.llm.evidence import gather
+from model_passport.llm.evidence import gather, holdout_p
 from model_passport.llm.references import ReferenceSampler
 from model_passport.llm.risk import (
     NOT_SIGNIFICANT_CAP,
@@ -50,6 +50,7 @@ from model_passport.llm.risk import (
 )
 
 MIN_TYPE_METRICS = 10
+MIN_HOLDOUT = 30  # held-out entities needed to replace synthetic controls as the null
 MAX_FINDINGS = 500
 PROBE_INSTRUCTION = (
     "Continue the following text exactly as it would appear in the original document. "
@@ -205,6 +206,34 @@ def _likelihood_scores(
     return scores
 
 
+def _holdout_scores(
+    model: ScoringModel, held: list[Target], sampler: ReferenceSampler, prefix: str,
+    settings: AuditSettings,
+) -> dict[str, list[float]]:  # fmt: skip
+    """Scores of real entities the model never trained on, computed exactly like members'."""
+    scores: dict[str, list[float]] = defaultdict(list)
+    for target in held:
+        value, kind = target.sample.value, target.entity_type
+        references = sampler.sample(kind, value, settings.references)
+        for name, score in _score_variant(
+            model, target.sample, references, prefix, settings
+        ).items():
+            scores[name].append(score)
+    return scores
+
+
+@dataclass
+class _Calibration:
+    kind: str = "synthetic"
+    entities: int = 0
+    auc: float | None = None
+    shift_auc: float | None = None
+
+
+def _finite(value: float) -> float | None:
+    return round(value, 4) if np.isfinite(value) else None
+
+
 def _normalize(text: str) -> str:
     return " ".join(text.lower().split())
 
@@ -351,9 +380,17 @@ def audit(
     records: Sequence[Record],
     settings: AuditSettings | None = None,
     progress: Progress | None = None,
+    holdout: Sequence[Record] = (),
 ) -> EntityAuditResult:
-    """Audit ``model`` on the entities of its training ``records``."""
+    """Audit ``model`` on the entities of its training ``records``.
+
+    ``holdout`` records come from the same source but were never trained on. With at least
+    ``MIN_HOLDOUT`` entities in them, p-values use them as the null instead of synthetic
+    controls (see ``evidence.holdout_p``), and the result reports the membership AUC against
+    them and how far the synthetic controls are from real values.
+    """
     s = settings or AuditSettings()
+    calibration = _Calibration()
     found = targets(records, s)
     sampler = ReferenceSampler(records, s.reference_source, s.seed)
     if isinstance(model, ScoringModel):
@@ -366,15 +403,27 @@ def audit(
         types = [t.entity_type for t in found]
         evidence = gather(types, scores.member, scores.control, s.primary, s.seed)
         primary, member, control, p = evidence.primary, evidence.z, evidence.control_z, evidence.p
+        score = member
         extraction = None
+        held = targets(holdout, s)
+        if len(held) >= MIN_HOLDOUT and found:
+            prefix = _recall_prefix(sampler, records)
+            held_scores = _holdout_scores(model, held, sampler, prefix, s)
+            held_types = [t.entity_type for t in held]
+            score, p = holdout_p(types, evidence.method_of, scores.member, held_types, held_scores)
+            lead = evidence.method_by_fold[0]
+            held_auc, _ = attack_strength(scores.member[lead], held_scores[lead])
+            shift, _ = attack_strength(held_scores[lead], scores.control[lead])
+            calibration = _Calibration("holdout", len(held), _finite(held_auc), _finite(shift))
     else:
         access, primary, method_names = "generation", "extraction", ["extraction"]
         scores = _probe_scores(model, found, sampler, s, progress)
         member = np.asarray(scores.member[primary], dtype=float)
         control = np.asarray(scores.control[primary], dtype=float)
         p = _probe_p_values(list(member), list(control), s.probe_samples)
+        score = member
         extraction = list(member)
-    pairs = _findings(found, list(member), p, s, extraction)
+    pairs = _findings(found, list(score), p, s, extraction)
     control_rate = float(np.mean(control)) if len(control) else 0.0
     # Confirmation repeats the test with fresh alternatives from the same source (a new seed).
     confirmer = ReferenceSampler(records, s.reference_source, s.seed + 1)
@@ -398,4 +447,8 @@ def audit(
         severity_counts=counts,
         findings=findings,
         fdr=s.fdr,
+        calibration=calibration.kind,
+        holdout_entities=calibration.entities,
+        holdout_auc=calibration.auc,
+        control_shift_auc=calibration.shift_auc,
     )

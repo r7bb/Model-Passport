@@ -35,6 +35,7 @@ Every step is signed and logged, so an auditor, investor, or buyer can check the
 |---|---|
 | Memorized details | For each name, email, card number, and so on in the training data: does the model prefer the real value over look-alike fakes? If so, it memorized it. |
 | Leakage on request | For models behind an API: does the model write out a real value when shown the text that came before it? |
+| No false alarms from look-alikes | When MP trains the model, it holds back 15% of the records. The model never sees their details, so they show how a model treats real details it did *not* memorize. Findings are measured against those, so a model that simply finds real-looking values familiar isn't flagged. |
 | Risk level | Each finding gets a risk score from 0 to 10 and a level (Low, Medium, High, Critical), based on how certain the evidence is and how harmful that kind of detail is if leaked. |
 | Personal data in datasets | Are there names, emails, phone numbers, or ID numbers in tables of training data? Could someone single out a person? |
 | Tampering | Has the model, the data, or anything else changed since it was approved? |
@@ -43,7 +44,7 @@ Every step is signed and logged, so an auditor, investor, or buyer can check the
 
 ## See it in action
 
-These screenshots are from the real app, running on made-up data (no real people). A made-up clinic, "Northwind Health", trained a support assistant on 300 made-up tickets. MP found what the model had memorized, cleaned the data, retrained, checked again, and released the fixed version.
+These screenshots are from the real app. MP runs on your real training data and your real models; for the screenshots, and in every demo and test, it uses realistic made-up people instead, so no real person's data is ever shown or stored in this project. A made-up clinic, "Northwind Health", trained a support assistant on 300 made-up tickets. MP found what the model had memorized, cleaned the data, retrained, checked again, and released the fixed version.
 
 **1. See where every model stands.** Each organization gets its own dashboard, showing models in each stage and anything blocked by the kill switch.
 
@@ -107,8 +108,8 @@ MP also checks tabular models and datasets, with a [readable report](https://raw
 
 | Ready now | Being built |
 |---|---|
-| Memorization testing of language models, for open models and API models | Serving models behind the developer and customer endpoints, with live monitoring |
-| Cleaning risky details and retraining, until the release gate passes | Automatic leak probing during verification |
+| Memorization testing of language models, for open models and API models, checked against held-back real records | Serving models behind the developer and customer endpoints, with live monitoring |
+| Cleaning risky details and retraining, until the release gate passes | Automatic leak probing during verification, and an accuracy benchmark on public data (AI4Privacy) with real open models |
 | The web app: a console for platform administrators, and a dashboard for each organization | Container images for every service, and cloud deployment (Kubernetes, Terraform) |
 | A service for many organizations, each with its own address, logins, roles, and encryption key, and data no other organization can see | |
 | Approvals, canary testing, release, rollback, and a kill switch, run by a control plane and the `mp` command-line tool | |

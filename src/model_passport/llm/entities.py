@@ -11,10 +11,11 @@ identify in combination, and 0.4 for low-sensitivity attributes.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -134,6 +135,23 @@ def detect(text: str) -> list[Span]:
         if all(span.end <= k.start or span.start >= k.end for k in kept):
             kept.append(span)
     return sorted(kept, key=lambda s: s.start)
+
+
+def split_holdout(records: Sequence[Record], fraction: float) -> tuple[list[Record], list[Record]]:
+    """(train, holdout): a stable share of records, chosen by a hash of each record's id.
+
+    The same id is always on the same side, so a sanitized copy of a corpus (which keeps the
+    ids) holds out the same records, and the audit can use them as real non-members.
+    """
+    if fraction <= 0:
+        return list(records), []
+    cut = int(fraction * 10_000)
+    train: list[Record] = []
+    holdout: list[Record] = []
+    for record in records:
+        bucket = int.from_bytes(hashlib.sha256(record.id.encode()).digest()[:4], "big") % 10_000
+        (holdout if bucket < cut else train).append(record)
+    return train, holdout
 
 
 # --- Corpus loading ----------------------------------------------------------------------------

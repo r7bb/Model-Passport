@@ -81,6 +81,14 @@ The backend calls the control plane for canary, release, rollback, and kill. Int
 - **Security:** the login token lives in an httpOnly cookie and never reaches browser code. Every call goes from the Next.js server to the backend with the person's own token, so the backend decides. Organization subdomains (`<slug>.<MP_BASE_DOMAIN>`) open the right dashboard, and the diligence report is served in a sandbox.
 - **Demo and screenshots:** `scripts/demo_platform.py` runs the whole stack on a made-up organization, and `scripts/web_screenshots.py` captures the README images from it.
 
+## Accuracy and hardening (next)
+
+From the 2026-09-26 review, in order:
+1. **Accuracy.** Held-out calibration is done. Next: a benchmark on public data (AI4Privacy) with real open models (Pythia, GPT-2), planted canaries at known repeat counts, and published detection and false-alarm rates; model-based detection of names and addresses in unlabeled text (GLiNER or Presidio) with measured precision and recall.
+2. **Security.** Login attempt limits, token revocation on sign-out, SSO and MFA, invites and password reset, and anchoring the audit-log head outside the database.
+3. **Bring your own training.** Export the sanitized dataset with a signed change record, retrain anywhere, then register and re-audit; output filtering for API models.
+4. **Large uploads** straight to storage with pre-signed URLs.
+
 ## Ideas for later
 
 **Model quality**

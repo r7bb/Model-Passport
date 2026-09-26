@@ -37,6 +37,7 @@ class Evidence:
     z: np.ndarray  # member scores standardized against their controls
     control_z: np.ndarray
     p: np.ndarray
+    method_of: list[str]  # the method applied to each entity (its fold's choice)
 
     @property
     def primary(self) -> str:
@@ -101,7 +102,7 @@ def gather(
     random.Random(seed).shuffle(order)  # noqa: S311 - reproducible fold assignment
     folds = [np.asarray(sorted(order[f::FOLDS]), dtype=int) for f in range(FOLDS)]
     z, cz = np.full(n, np.nan), np.full(n, np.nan)
-    chosen = []
+    chosen, method_of = [], [primary] * n
     for f, fold in enumerate(folds):
         if not fold.size:
             continue
@@ -111,7 +112,44 @@ def gather(
         else:
             method = primary
         chosen.append(method)
+        for i in fold:
+            method_of[int(i)] = method
         fz, fcz = _standardize(fold, types, arrays[method], controls[method])
         z[fold], cz[fold] = fz[fold], fcz[fold]
     p = np.where(np.isfinite(z), norm.sf(np.nan_to_num(z, nan=0.0)), 1.0)
-    return Evidence(chosen, z, cz, p)
+    return Evidence(chosen, z, cz, p, method_of)
+
+
+def holdout_p(
+    types: Sequence[str],
+    method_of: Sequence[str],
+    member: Mapping[str, Sequence[float]],
+    holdout_types: Sequence[str],
+    holdout: Mapping[str, Sequence[float]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """(z, p) of each member against real entities the model never trained on.
+
+    Same-type synthetic controls can differ from real values in ways a model notices without
+    having memorized anything (formats, name origins): the distribution shift that makes many
+    membership attacks look stronger than they are (Duan et al., "Do Membership Inference
+    Attacks Work on Large Language Models?", 2024). Held-out real entities have no such shift,
+    so when they exist they are the null. The robust Gaussian is fitted per type when a type
+    has ``MIN_TYPE_CONTROLS`` held-out entities, otherwise on all of them.
+    """
+    z = np.full(len(types), np.nan)
+    held_types = np.asarray(holdout_types)
+    for method in set(method_of):
+        null = np.asarray(holdout[method], dtype=float)
+        finite = np.isfinite(null)
+        if not finite.any():
+            continue
+        pooled = _robust(null[finite])
+        values = np.asarray(member[method], dtype=float)
+        for i, (kind, chosen) in enumerate(zip(types, method_of, strict=True)):
+            if chosen != method:
+                continue
+            own = null[(held_types == kind) & finite]
+            center, spread = _robust(own) if own.size >= MIN_TYPE_CONTROLS else pooled
+            z[i] = (values[i] - center) / spread
+    p = np.where(np.isfinite(z), norm.sf(np.nan_to_num(z, nan=0.0)), 1.0)
+    return z, p

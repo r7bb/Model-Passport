@@ -64,6 +64,9 @@ class WorkerContext:
     master_key: bytes
     name: str = field(default_factory=lambda: f"{socket.gethostname()}-worker")
     audit: AuditSettings = field(default_factory=AuditSettings)
+    # Share of records the platform never trains on; audits of its models use them as real
+    # non-members, so findings do not depend on synthetic controls resembling real values.
+    holdout: float = 0.15
     training: dict[str, TrainSettings] = field(
         default_factory=lambda: {
             "tiny": TrainSettings(epochs=15, learning_rate=2e-3, batch_size=32),
@@ -132,7 +135,7 @@ def _train(ctx: WorkerContext, job: Job, work: Path) -> dict[str, Any]:
         corpus.write_bytes(files.get(dataset.object_key))
         base = version.model.base
     out = work / "trained"
-    history = finetune_corpus(corpus, out, base, _training(ctx, base))
+    history = finetune_corpus(corpus, out, base, _training(ctx, base), ctx.holdout)
     with scoped_session(ctx.factory, job.tenant_id) as session:
         version = services.get(session, ModelVersion, job.tenant_id, job.payload["version"])
         version.artifact_key, version.artifact_sha256 = _store_model(files, out)
@@ -154,7 +157,9 @@ def _audit(ctx: WorkerContext, job: Job, work: Path) -> dict[str, Any]:
         corpus = work / "reference.jsonl"
         corpus.write_bytes(files.get(reference.object_key))
         spec = _model_spec(files, version, work)
-    result = audit_corpus(spec, corpus, work / "audit.json", ctx.audit)
+        trained_here = version.artifact_key is not None  # so the holdout was never trained on
+    holdout = ctx.holdout if trained_here else 0.0
+    result = audit_corpus(spec, corpus, work / "audit.json", ctx.audit, holdout=holdout)
     verdict = gate.check(result)
     with scoped_session(ctx.factory, job.tenant_id) as session:
         version = services.get(session, ModelVersion, job.tenant_id, job.payload["version"])
@@ -222,7 +227,7 @@ def _remediate(ctx: WorkerContext, job: Job, work: Path) -> dict[str, Any]:
     cleaned, report = sanitize(train, translate(found, raw, train, only_original=True))
     write_corpus(cleaned, work / "sanitized.jsonl")
     out = work / "retrained"
-    finetune_corpus(work / "sanitized.jsonl", out, base, _training(ctx, base))
+    finetune_corpus(work / "sanitized.jsonl", out, base, _training(ctx, base), ctx.holdout)
     with scoped_session(ctx.factory, job.tenant_id) as session:
         version = services.get(session, ModelVersion, job.tenant_id, job.payload["version"])
         tenant = session.get(Tenant, job.tenant_id)

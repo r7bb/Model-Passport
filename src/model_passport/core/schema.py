@@ -280,6 +280,19 @@ class EntityAuditResult(_Strict):
         default_factory=list, description="Significant or high-risk entities, riskiest first."
     )
     fdr: float = 0.05
+    calibration: str = Field(
+        default="synthetic",
+        description="The null for p-values: synthetic controls, or held-out real entities.",
+    )
+    holdout_entities: int = Field(default=0, description="Real entities the model never saw.")
+    holdout_auc: float | None = Field(
+        default=None,
+        description="Members vs held-out real entities: membership AUC free of synthetic bias.",
+    )
+    control_shift_auc: float | None = Field(
+        default=None,
+        description="Held-out real entities vs synthetic controls; near 0.5 means a fair control.",
+    )
     taxonomy: list[str] = Field(default_factory=lambda: list(ENTITY_AUDIT_TAXONOMY))
 
 

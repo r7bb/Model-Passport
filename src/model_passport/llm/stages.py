@@ -17,7 +17,7 @@ from model_passport.core.schema import EntityAuditResult
 from model_passport.llm import training
 from model_passport.llm.audit import AuditSettings, audit
 from model_passport.llm.backends import HuggingFaceModel, ModelError, load_model
-from model_passport.llm.entities import Record, load_corpus
+from model_passport.llm.entities import Record, load_corpus, split_holdout
 from model_passport.runtime import params
 
 FINGERPRINT_ENV = "PASSPORT_FINGERPRINT_KEY"
@@ -61,10 +61,15 @@ def read_corpus(path: Path) -> list[Record]:
 
 
 def finetune_corpus(
-    corpus: Path, out: Path, base: str, settings: training.TrainSettings
+    corpus: Path, out: Path, base: str, settings: training.TrainSettings, holdout: float = 0.0
 ) -> list[float]:
-    """Fine-tune ``base`` (or a new tiny model) on ``corpus`` and save it to ``out``."""
-    texts = [r.text for r in read_corpus(corpus)]
+    """Fine-tune ``base`` (or a new tiny model) on ``corpus`` and save it to ``out``.
+
+    ``holdout`` keeps that share of records out of training (see ``split_holdout``) so a
+    later audit can calibrate against real entities the model never saw.
+    """
+    train, _ = split_holdout(read_corpus(corpus), holdout)
+    texts = [r.text for r in train]
     if base == "tiny":
         model = training.tiny_model(texts, seed=settings.seed)
     else:
@@ -78,11 +83,19 @@ def finetune_corpus(
 
 
 def audit_corpus(
-    model_spec: str, corpus: Path, out: Path, settings: AuditSettings, device: str | None = None
+    model_spec: str,
+    corpus: Path,
+    out: Path,
+    settings: AuditSettings,
+    device: str | None = None,
+    holdout: float = 0.0,
 ) -> EntityAuditResult:
-    """Audit a model on the entities of ``corpus`` and write the result to ``out``."""
-    records = read_corpus(corpus)
-    result = audit(load_model(model_spec, device), records, settings)
+    """Audit a model on the entities of ``corpus`` and write the result to ``out``.
+
+    With ``holdout``, the records held out of training are the audit's real non-members.
+    """
+    records, held = split_holdout(read_corpus(corpus), holdout)
+    result = audit(load_model(model_spec, device), records, settings, holdout=held)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return result
