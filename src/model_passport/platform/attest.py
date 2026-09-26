@@ -39,10 +39,14 @@ def signing_key(tenant: Tenant, files: TenantStore) -> Ed25519PrivateKey:
         pem = files.get(KEY_OBJECT)
     except StorageError:
         key = Ed25519PrivateKey.generate()
-        files.put(KEY_OBJECT, key.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        ))  # fmt: skip
+        files.put(
+            KEY_OBJECT,
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ),
+        )
         tenant.public_key = (
             key.public_key()
             .public_bytes(
@@ -75,9 +79,12 @@ def _load(session: Session, dataset_id: str | None) -> Dataset | None:
 
 
 def attest(
-    session: Session, tenant: Tenant, files: TenantStore, version: ModelVersion,
+    session: Session,
+    tenant: Tenant,
+    files: TenantStore,
+    version: ModelVersion,
     gate: PolicyResult | None,
-) -> dict[str, Any]:  # fmt: skip
+) -> dict[str, Any]:
     """Sign an attestation for ``version``, store it on the row, and log it."""
     key = signing_key(tenant, files)
     parent = session.get(ModelVersion, version.parent_id) if version.parent_id else None
@@ -96,20 +103,41 @@ def attest(
         "artifact_sha256": version.artifact_sha256,
         "training_data": _dataset(_load(session, version.dataset_id)),
         "reference_data": _dataset(_load(session, version.reference_dataset_id)),
-        "parent": None if parent is None else {
-            "version": parent.version, "attestation_sha256": parent.attestation_sha256,
+        "parent": None
+        if parent is None
+        else {
+            "version": parent.version,
+            "attestation_sha256": parent.attestation_sha256,
         },
-        "audit": {k: audit.get(k) for k in ("model", "access", "primary_method", "entities_audited",
-                                              "auc", "tpr_at_fpr", "severity_counts", "taxonomy")},
+        "audit": {
+            k: audit.get(k)
+            for k in (
+                "model",
+                "access",
+                "primary_method",
+                "entities_audited",
+                "auc",
+                "tpr_at_fpr",
+                "severity_counts",
+                "taxonomy",
+            )
+        },
         "gate": None if gate is None else gate.model_dump(mode="json"),
         "audit_log_head": None if not head else {"seq": head[0].seq, "hash": head[0].hash},
         "public_key_fingerprint": identity.public_key_fingerprint(key.public_key()),
-    }  # fmt: skip
+    }
     document["signature"] = identity.sign(key, identity.canonical_json(document))
     version.attestation = document
     version.attestation_sha256 = identity.sha256_bytes(identity.canonical_json(document))
-    auditlog.record(session, tenant.id, auditlog.SYSTEM, "version.attested", "model_version",
-                    version.id, {"sha256": version.attestation_sha256})  # fmt: skip
+    auditlog.record(
+        session,
+        tenant.id,
+        auditlog.SYSTEM,
+        "version.attested",
+        "model_version",
+        version.id,
+        {"sha256": version.attestation_sha256},
+    )
     return document
 
 

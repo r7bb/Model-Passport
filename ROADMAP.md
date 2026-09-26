@@ -4,7 +4,7 @@ MP (Model Passport) is an entity-level PII leakage auditing and remediation plat
 
 ## Where things stand
 
-The passport engine (phases 1–7) and platform phases A–D are done: 246 Python tests plus Go tests, strict ruff and mypy, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phases E–G are next.
+The passport engine (phases 1–7) and platform phases A–E are done, with Python, Go, and web tests, strict ruff, mypy, ESLint, and TypeScript, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the Go services, the web app, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phases F and G are next.
 
 | Phase | What it delivers |
 |---|---|
@@ -48,7 +48,7 @@ Decisions: build all modules; audit open-weight and API models from the start; r
 | B. Remediation (**done**) | Sanitize risky entities (surrogate, mask, or drop), fine-tune again from the base checkpoint, re-audit, and link the new version to the old one in a signed passport | M6, M7 |
 | C. Backend (**done**) | FastAPI with PostgreSQL: tenants, 7 roles, RBAC, append-only audit log, per-tenant encrypted object storage, job queue and Python workers, provenance and diligence reports | M2, M3, M4, M9 |
 | D. Control plane (**done**) | Go control plane (orchestration, deploy, rollback, kill switch) over gRPC, API gateway (subdomain → tenant, login check), and the `mp` CLI | M7, M8 |
-| E. Web app | Next.js super-admin console and tenant dashboard for every module | M1–M9 |
+| E. Web app (**done**) | Next.js super-admin console and tenant dashboard for every module | M1–M9 |
 | F. Release flow | Canary release to developer endpoints, verification (re-audit, canary testers, Claude/GPT probing), approval, consumer release, monitoring, rollback, kill switch | M8 |
 | G. Infrastructure | Dockerfiles for every service, Docker Compose, Helm chart for Kubernetes, and Terraform for the cloud (network, cluster, database, encrypted storage) | |
 
@@ -71,6 +71,15 @@ Everything is in `model_passport.platform`, tested end to end over HTTP on SQLit
 - **`mp`:** the CLI for login, status, deploy, rollback, and kill.
 
 The backend calls the control plane for canary, release, rollback, and kill. Integration tests build the Go binary, run it against PostgreSQL, and verify the shared audit chain from Python.
+
+## Phase E: the web app
+
+`web/` (Next.js 16, React 19, Tailwind 4, TypeScript 5.9):
+- **Super-admin console:** organizations (create, plan, suspend), first org admins, and the platform audit log.
+- **Organization dashboard:** M1 (lifecycle overview), M2 (people and roles), M3 (risk across versions), M4 (audit log with chain check), M5 and M6 (models, versions, lineage, masked findings), M7 (jobs, live refresh), M8 (deployments and canary reports), M9 (datasets, uploads, diligence reports).
+- **Every lifecycle step from the page:** audit, remediate, canary, verify, approve or reject, release, rollback, and the kill switch. Each person sees only the steps their role allows.
+- **Security:** the login token lives in an httpOnly cookie and never reaches browser code. Every call goes from the Next.js server to the backend with the person's own token, so the backend decides. Organization subdomains (`<slug>.<MP_BASE_DOMAIN>`) open the right dashboard, and the diligence report is served in a sandbox.
+- **Demo and screenshots:** `scripts/demo_platform.py` runs the whole stack on a made-up organization, and `scripts/web_screenshots.py` captures the README images from it.
 
 ## Ideas for later
 

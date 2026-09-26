@@ -273,6 +273,36 @@ mp kill --version <id> --reason "customer data in a reply"
 
 A developer deploy needs a clean, canary, or verifying version, and a consumer deploy needs an approved one. Nothing deploys a killed version. After a change to `controlplane/proto`, run `scripts/gen_proto.sh` to regenerate the Go and Python code.
 
+### The web app
+
+The web app in `web/` is the super-admin console and each organization's dashboard (modules M1 to M9). It needs Node.js 20.9 or newer. It talks only to the backend, from the server: the login token is kept in an httpOnly cookie that browser scripts cannot read.
+
+```bash
+cd web
+npm ci
+MP_API_URL=http://localhost:8080 npm run dev        # http://localhost:3000
+# production: npm run build && MP_API_URL=... MP_BASE_DOMAIN=mp.example.com npm start
+```
+
+| Setting | Meaning |
+|---|---|
+| `MP_API_URL` | The backend (or the gateway), default `http://localhost:8080` |
+| `MP_BASE_DOMAIN` | With `mp.example.com`, visiting `usps.mp.example.com` opens the `usps` dashboard directly |
+
+Checks: `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build`.
+
+### Try everything on made-up data
+
+`scripts/demo_platform.py` starts the whole platform on your machine: PostgreSQL, the control plane (if Go is installed), the backend, and a worker. It then runs the product flow on a made-up organization, Northwind Health: training, audit, remediation, a canary test, approval, and release. Every person and record comes from Faker.
+
+```bash
+pip install -e ".[dev,llm,platform]"
+python scripts/demo_platform.py                     # prints the accounts; password "demo password 2026"
+cd web && npm ci && npm run dev                     # then sign in at http://localhost:3000
+```
+
+Sign in as `root@platform.example` for the platform console, or as any printed account to see that role's view. `python scripts/web_screenshots.py` refreshes the README screenshots from this demo.
+
 ### How organizations are kept apart
 
 - **In the database:** PostgreSQL row-level security. Every transaction is limited to one organization, so even a query that forgets its filter cannot read another organization's rows. A session with no organization set sees nothing.

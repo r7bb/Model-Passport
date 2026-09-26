@@ -43,7 +43,50 @@ Every step is signed and logged, so an auditor, investor, or buyer can check the
 
 ## See it in action
 
-Set up a project, then let MP test, clean, retrain, and re-test until the model is safe to release. This is real output on 400 made-up support tickets:
+These screenshots are from the real app, running on made-up data (no real people). A made-up clinic, "Northwind Health", trained a support assistant on 300 made-up tickets. MP found what the model had memorized, cleaned the data, retrained, checked again, and released the fixed version.
+
+**1. See where every model stands.** Each organization gets its own dashboard, showing models in each stage and anything blocked by the kill switch.
+
+![Organization dashboard](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-dashboard.png)
+
+**2. See exactly what leaked.** Every personal detail the model memorized is listed from riskiest to least risky, with its level and whether a second test confirmed it. Real values are never shown, only masked ones.
+
+![Audit findings](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-findings.png)
+
+**3. Fix it, and keep the history.** The first version (1.0.0) had memorized 83 critical and 465 high-risk details. An attack score (AUC) of 0.98 means they were easy to spot. After cleaning and retraining, version 1.1.0 scored 0.49, which is no better than a coin flip, and was released. The old version is kept.
+
+![Model versions](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-model.png)
+
+**4. Release safely.** Testers try the model on private developer endpoints first. Customers can reach only approved, released versions, and one switch blocks a version everywhere at once.
+
+![Deployments](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-deployments.png)
+
+**5. Prove it to investors and buyers.** Each model has a report showing where its data came from and who consented, every version and test, signed records, and a check that the activity log hasn't been changed.
+
+![Diligence report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-diligence.png)
+
+<details>
+<summary>More screens: platform console, people and roles, analytics, activity log, data sources, and sign-in</summary>
+
+| Platform console (all organizations) | People and roles |
+|---|---|
+| ![Platform console](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-admin.png) | ![People and roles](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-members.png) |
+
+| Risk across versions | Tamper-proof activity log |
+|---|---|
+| ![Analytics](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-analytics.png) | ![Audit log](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-audit-log.png) |
+
+| Where the data came from | Sign in |
+|---|---|
+| ![Data provenance](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-data.png) | ![Sign in](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/web-login.png) |
+
+</details>
+
+Each person sees only what their role allows. An ML engineer can test and fix models, a compliance auditor approves releases and can use the kill switch, a canary tester reports leaks, and an outside reviewer sees only the reports.
+
+### From the command line
+
+The same loop works without the web app. This is real output on 400 made-up support tickets:
 
 ```
 $ passport init --llm --corpus corpus.jsonl
@@ -56,32 +99,19 @@ v1.2.0: verdict pass, AUC 0.4926, critical 0, high 0
 release gate passed at v1.2.0
 ```
 
-How to read the rounds:
+After round two no single detail stood out, but the details as a group were still slightly recognizable (AUC 0.61). So MP replaced every value of those five kinds, and round three passed. Every High or Critical finding is re-tested with fresh evidence before it counts.
 
-- **v1.0.0** had memorized 107 card numbers, IBANs, and ID numbers (Critical) and 638 other details (High). An attack score (AUC) of 0.99 means they were easy to spot; 0.5 would be a coin flip.
-- **v1.1.0:** after the risky values were replaced with realistic fakes and the model retrained, no single detail stood out. But the details as a group were still slightly recognizable (AUC 0.61), so every value of those five kinds was replaced.
-- **v1.2.0** passed: an attacker does no better than guessing.
-
-Each version is a signed passport linked to the one before, and old versions and their training data are kept. Every High or Critical finding is re-tested with fresh evidence before it counts.
-
-The passport also covers tabular models, with a readable report and a dashboard:
-
-| Passed | Failed |
-|---|---|
-| ![Passing report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-pass.png) | ![Failing report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-fail.png) |
-
-| How it was built | Privacy results |
-|---|---|
-| ![Pipeline](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-pipeline.png) | ![Privacy](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-privacy.png) |
+MP also checks tabular models and datasets, with a [readable report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-pass.png) and a [dashboard](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-privacy.png).
 
 ## What's ready, and what's coming
 
 | Ready now | Being built |
 |---|---|
-| Memorization testing of language models, for open models and API models | The web app: a console for administrators, and a dashboard for each organization |
-| Cleaning risky details and retraining, until the release gate passes | Test endpoints for canary testers, live monitoring, and rollback |
-| A service for many organizations, each with its own login, roles, and encryption key, and data no other organization can see | The command-line tool `mp` and the control plane that deploys models |
-| Roles from administrator to outside reviewer, approvals, release, and a kill switch | Cloud deployment (Kubernetes, Terraform) |
+| Memorization testing of language models, for open models and API models | Serving models behind the developer and customer endpoints, with live monitoring |
+| Cleaning risky details and retraining, until the release gate passes | Automatic leak probing during verification |
+| The web app: a console for platform administrators, and a dashboard for each organization | Container images for every service, and cloud deployment (Kubernetes, Terraform) |
+| A service for many organizations, each with its own address, logins, roles, and encryption key, and data no other organization can see | |
+| Approvals, canary testing, release, rollback, and a kill switch, run by a control plane and the `mp` command-line tool | |
 | A tamper-proof activity log, signed records for every version, and a report for investors and buyers | |
 | Checks for tabular models and datasets, drift monitoring, and a GitHub Action | |
 

@@ -169,8 +169,11 @@ def _audit(ctx: WorkerContext, job: Job, work: Path) -> dict[str, Any]:
         target = State.FINDINGS if risky else State.CLEAN
         lifecycle.move(session, version, target, WORKER, f"gate verdict {version.verdict}")
         attest.attest(session, tenant, ctx.files(tenant), version, verdict)
-    return {"verdict": verdict.verdict.value, "auc": result.auc,
-            "severity_counts": result.severity_counts}  # fmt: skip
+    return {
+        "verdict": verdict.verdict.value,
+        "auc": result.auc,
+        "severity_counts": result.severity_counts,
+    }
 
 
 def _whole_types(session: Session, version: ModelVersion, audit: EntityAuditResult) -> set[str]:
@@ -226,23 +229,38 @@ def _remediate(ctx: WorkerContext, job: Job, work: Path) -> dict[str, Any]:
         assert tenant is not None
         files = ctx.files(tenant)
         dataset = services.add_dataset(
-            session, files, tenant, f"{source['name']}-v{next_version}",
+            session,
+            files,
+            tenant,
+            f"{source['name']}-v{next_version}",
             (work / "sanitized.jsonl").read_bytes(),
-            services.Provenance(f"sanitized from {source['name']} for v{next_version}",
-                                source["license"], source["consent"]),
+            services.Provenance(
+                f"sanitized from {source['name']} for v{next_version}",
+                source["license"],
+                source["consent"],
+            ),
             SYSTEM,
-        )  # fmt: skip
+        )
         reference_row = session.get(Dataset, version.reference_dataset_id or "")
         assert reference_row is not None
         successor = services.register_version(
-            session, version.model, next_version, dataset, reference_row, SYSTEM,
-            artifact=_store_model(files, out), parent=version,
-        )  # fmt: skip
+            session,
+            version.model,
+            next_version,
+            dataset,
+            reference_row,
+            SYSTEM,
+            artifact=_store_model(files, out),
+            parent=version,
+        )
         lifecycle.move(session, version, State.SUPERSEDED, WORKER, f"replaced by v{next_version}")
         lifecycle.move(session, successor, State.AUDITING, WORKER, "remediated; auditing")
         jobs.enqueue(session, job.tenant_id, "audit", {"version": successor.id}, SYSTEM)
-    return {"successor": next_version, "sanitized": dict(report.replaced),
-            "whole_types": sorted(whole)}  # fmt: skip
+    return {
+        "successor": next_version,
+        "sanitized": dict(report.replaced),
+        "whole_types": sorted(whole),
+    }
 
 
 def _report(ctx: WorkerContext, job: Job, _work: Path) -> dict[str, Any]:

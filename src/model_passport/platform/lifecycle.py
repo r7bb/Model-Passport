@@ -86,6 +86,11 @@ def move(session: Session, version: ModelVersion, to: State, who: Who, reason: s
     before = version.state
     version.state = to
     auditlog.record(
-        session, version.tenant_id, who.actor, f"version.{to.value}", "model_version",
-        version.id, {"from": before.value, "to": to.value, "reason": reason},
-    )  # fmt: skip
+        session,
+        version.tenant_id,
+        who.actor,
+        f"version.{to.value}",
+        "model_version",
+        version.id,
+        {"from": before.value, "to": to.value, "reason": reason},
+    )

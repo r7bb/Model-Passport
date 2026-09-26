@@ -319,9 +319,16 @@ def upgrade() -> None:
 
 
 TENANT_TABLES = (
-    "memberships", "datasets", "models", "model_versions", "approvals", "deployments",
-    "test_reports", "jobs", "audit_events",
-)  # fmt: skip
+    "memberships",
+    "datasets",
+    "models",
+    "model_versions",
+    "approvals",
+    "deployments",
+    "test_reports",
+    "jobs",
+    "audit_events",
+)
 VISIBLE = "current_setting('app.tenant_id', true) = '*' OR {column} = current_setting('app.tenant_id', true)"
 
 

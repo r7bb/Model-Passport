@@ -29,6 +29,8 @@ from model_passport.platform.api.schemas import (
     ModelDetail,
     ModelIn,
     ModelOut,
+    TestReportIn,
+    TestReportOut,
     TransitionIn,
     VersionIn,
     VersionOut,
@@ -43,6 +45,7 @@ from model_passport.platform.models import (
     Model,
     ModelVersion,
     State,
+    TestReport,
     User,
 )
 from model_passport.platform.rbac import Permission
@@ -76,8 +79,13 @@ def _dataset(c: Ctx, dataset_id: str) -> Dataset:
         raise HTTPException(404, str(exc)) from exc
 
 
-CONTROLPLANE_HTTP = {"PERMISSION_DENIED": 403, "FAILED_PRECONDITION": 409, "NOT_FOUND": 404,
-                     "UNAUTHENTICATED": 401, "INVALID_ARGUMENT": 400}  # fmt: skip
+CONTROLPLANE_HTTP = {
+    "PERMISSION_DENIED": 403,
+    "FAILED_PRECONDITION": 409,
+    "NOT_FOUND": 404,
+    "UNAUTHENTICATED": 401,
+    "INVALID_ARGUMENT": 400,
+}
 DEPLOYS = {State.CANARY: "dev", State.RELEASED: "consumer"}
 
 
@@ -428,18 +436,31 @@ def transition(
     return version
 
 
+def _check_approvable(c: Ctx, version: ModelVersion) -> None:
+    if version.verdict == "fail" or version.critical or version.high:
+        raise HTTPException(409, "the latest audit still has blocking findings; remediate first")
+    leaks = c.session.scalar(
+        select(func.coalesce(func.sum(TestReport.leaks_found), 0)).where(
+            TestReport.version_id == version.id
+        )
+    )
+    if leaks:
+        raise HTTPException(409, "canary testers reported leaks; remediate before approving")
+
+
 @router.post(
     "/versions/{version_id}/approvals", response_model=VersionOut, tags=["M2 access & roles"]
 )
 def decide(
     version_id: str, body: DecisionIn, c: Annotated[Ctx, ctx(P.APPROVALS_DECIDE)]
 ) -> ModelVersion:
-    """Sign off (or reject) a verified version. Approval requires a passing, clean audit."""
+    """Sign off (or reject) a verified version.
+
+    Approval needs a passing, clean audit and no leaks reported by canary testers.
+    """
     version = _version(c, version_id)
-    if body.decision == "approve" and (
-        version.verdict == "fail" or version.critical or version.high
-    ):
-        raise HTTPException(409, "the latest audit still has blocking findings; remediate first")
+    if body.decision == "approve":
+        _check_approvable(c, version)
     c.session.add(
         Approval(
             tenant_id=c.tenant.id,
@@ -503,6 +524,60 @@ def generate_report(model_id: str, c: Annotated[Ctx, ctx(P.REPORTS_READ)]) -> Jo
     """Generate and store the diligence report (JSON and HTML), encrypted."""
     return jobs.enqueue(
         c.session, c.tenant.id, "report", {"model": _model(c, model_id).id}, c.actor
+    )
+
+
+# --- M8 Developer endpoints and testing ---------------------------------------------------------
+
+
+@router.post(
+    "/versions/{version_id}/test-reports",
+    response_model=TestReportOut,
+    status_code=201,
+    tags=["M8 dev endpoints & testing"],
+)
+def submit_test_report(
+    version_id: str, body: TestReportIn, c: Annotated[Ctx, ctx(P.TEST_REPORTS)]
+) -> TestReport:
+    """A canary tester's extraction attempts against a version on developer endpoints."""
+    version = _version(c, version_id)
+    if version.state not in (State.CANARY, State.VERIFYING):
+        raise HTTPException(409, "test reports are for versions on developer endpoints")
+    report = TestReport(
+        tenant_id=c.tenant.id,
+        version_id=version.id,
+        user_id=c.user.id,
+        prompt_count=body.prompt_count,
+        leaks_found=body.leaks_found,
+        summary=body.summary,
+    )
+    c.session.add(report)
+    c.session.flush()
+    auditlog.record(
+        c.session,
+        c.tenant.id,
+        c.actor,
+        "testreport.submitted",
+        "model_version",
+        version.id,
+        {"prompts": body.prompt_count, "leaks": body.leaks_found},
+    )
+    return report
+
+
+@router.get(
+    "/versions/{version_id}/test-reports",
+    response_model=list[TestReportOut],
+    tags=["M8 dev endpoints & testing"],
+)
+def test_reports(version_id: str, c: Annotated[Ctx, ctx(P.MODELS_READ)]) -> list[TestReport]:
+    version = _version(c, version_id)
+    return list(
+        c.session.scalars(
+            select(TestReport)
+            .where(TestReport.version_id == version.id)
+            .order_by(TestReport.created_at)
+        )
     )
 
 

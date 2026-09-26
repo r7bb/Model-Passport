@@ -309,6 +309,12 @@ class AuditEvent(Base):
 
 
 TENANT_TABLES = (
-    "memberships", "datasets", "models", "model_versions", "approvals", "deployments",
-    "test_reports", "jobs",
-)  # fmt: skip
+    "memberships",
+    "datasets",
+    "models",
+    "model_versions",
+    "approvals",
+    "deployments",
+    "test_reports",
+    "jobs",
+)

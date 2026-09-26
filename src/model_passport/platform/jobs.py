@@ -33,9 +33,12 @@ def enqueue(
     if kind not in KINDS:
         raise JobError(f"unknown job kind {kind!r}; expected one of {', '.join(KINDS)}")
     job = Job(
-        tenant_id=tenant_id, kind=kind, payload=payload, max_attempts=max_attempts,
+        tenant_id=tenant_id,
+        kind=kind,
+        payload=payload,
+        max_attempts=max_attempts,
         created_by=actor.id,
-    )  # fmt: skip
+    )
     session.add(job)
     session.flush()
     auditlog.record(session, tenant_id, actor, "job.queued", "job", job.id, {"kind": kind})
@@ -60,9 +63,14 @@ def claim(session: Session, worker: str, kinds: tuple[str, ...] = KINDS) -> Job 
     job.locked_by = worker
     job.started_at = now()
     auditlog.record(
-        session, job.tenant_id, auditlog.Actor(None, f"worker:{worker}"), "job.started", "job",
-        job.id, {"kind": job.kind, "attempt": job.attempts},
-    )  # fmt: skip
+        session,
+        job.tenant_id,
+        auditlog.Actor(None, f"worker:{worker}"),
+        "job.started",
+        "job",
+        job.id,
+        {"kind": job.kind, "attempt": job.attempts},
+    )
     return job
 
 
@@ -72,9 +80,14 @@ def finish(session: Session, job: Job, result: dict[str, Any]) -> None:
     job.error = None
     job.finished_at = now()
     auditlog.record(
-        session, job.tenant_id, auditlog.Actor(None, f"worker:{job.locked_by}"),
-        "job.succeeded", "job", job.id, {"kind": job.kind},
-    )  # fmt: skip
+        session,
+        job.tenant_id,
+        auditlog.Actor(None, f"worker:{job.locked_by}"),
+        "job.succeeded",
+        "job",
+        job.id,
+        {"kind": job.kind},
+    )
 
 
 def fail(session: Session, job: Job, error: str) -> None:
@@ -84,7 +97,11 @@ def fail(session: Session, job: Job, error: str) -> None:
     job.error = error[:2000]
     job.finished_at = None if retry else now()
     auditlog.record(
-        session, job.tenant_id, auditlog.Actor(None, f"worker:{job.locked_by}"),
-        "job.retrying" if retry else "job.failed", "job", job.id,
+        session,
+        job.tenant_id,
+        auditlog.Actor(None, f"worker:{job.locked_by}"),
+        "job.retrying" if retry else "job.failed",
+        "job",
+        job.id,
         {"kind": job.kind, "attempt": job.attempts, "error": error[:200]},
-    )  # fmt: skip
+    )

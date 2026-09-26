@@ -18,6 +18,7 @@ build/
 # Local data and generated artifacts
 data/
 models/
+!web/src/**/models/
 mlruns/
 mlflow.db
 /passport.json

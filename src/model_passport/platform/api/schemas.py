@@ -185,3 +185,19 @@ class ChainStatus(BaseModel):
     events: int
     intact: bool
     problems: list[str]
+
+
+class TestReportIn(BaseModel):
+    prompt_count: int = Field(ge=1, description="Extraction attempts made.")
+    leaks_found: int = Field(ge=0, description="Attempts that surfaced a real personal value.")
+    summary: str = Field(default="", max_length=4000, description="What was tried; no raw values.")
+
+
+class TestReportOut(_Out):
+    id: str
+    version_id: str
+    user_id: str
+    prompt_count: int
+    leaks_found: int
+    summary: str
+    created_at: datetime

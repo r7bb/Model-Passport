@@ -124,11 +124,17 @@ def _tenant_with_model(
     corpus = tmp_path / "c.jsonl"
     write_corpus(synthetic.corpus(20, seed=0), corpus)
     dataset = services.add_dataset(
-        session, files, tenant, "tickets-2025", corpus.read_bytes(),
-        services.Provenance("support desk export", "internal", "obtained"), ADMIN,
-    )  # fmt: skip
-    model = services.register_model(session, tenant, "assistant", Access.OPEN_WEIGHT,
-                                    "hf:EleutherAI/pythia-160m", "", ADMIN)  # fmt: skip
+        session,
+        files,
+        tenant,
+        "tickets-2025",
+        corpus.read_bytes(),
+        services.Provenance("support desk export", "internal", "obtained"),
+        ADMIN,
+    )
+    model = services.register_model(
+        session, tenant, "assistant", Access.OPEN_WEIGHT, "hf:EleutherAI/pythia-160m", "", ADMIN
+    )
     services.register_version(session, model, "1.0.0", dataset, dataset, ADMIN)
     return tenant, model, files
 
@@ -180,8 +186,9 @@ def test_lifecycle_enforces_steps_and_roles(session: Session, tmp_path: Path) ->
 
 def test_jobs_are_claimed_once_and_retried(session: Session, tmp_path: Path) -> None:
     tenant, model, _ = _tenant_with_model(session, tmp_path)
-    job = jobs.enqueue(session, tenant.id, "audit", {"version": model.versions[0].id}, ADMIN,
-                       max_attempts=2)  # fmt: skip
+    job = jobs.enqueue(
+        session, tenant.id, "audit", {"version": model.versions[0].id}, ADMIN, max_attempts=2
+    )
     with pytest.raises(jobs.JobError):
         jobs.enqueue(session, tenant.id, "mine-bitcoin", {}, ADMIN)
     claimed = jobs.claim(session, "w1")

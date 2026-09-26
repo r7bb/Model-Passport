@@ -28,10 +28,16 @@ class ControlPlaneError(RuntimeError):
 
 def _deployment(d: Any) -> dict[str, Any]:
     return {
-        "id": d.id, "version_id": d.version_id, "model_id": d.model_id, "model": d.model,
-        "version": d.version, "environment": pb.Environment.Name(d.environment).lower(),
-        "status": d.status, "endpoint": d.endpoint, "created_at": d.created_at,
-    }  # fmt: skip
+        "id": d.id,
+        "version_id": d.version_id,
+        "model_id": d.model_id,
+        "model": d.model,
+        "version": d.version,
+        "environment": pb.Environment.Name(d.environment).lower(),
+        "status": d.status,
+        "endpoint": d.endpoint,
+        "created_at": d.created_at,
+    }
 
 
 @dataclass
@@ -71,5 +77,10 @@ class ControlPlane:
         out = self._call(
             "Resolve", pb.ResolveRequest(model=model, environment=ENVIRONMENTS[environment])
         )
-        return {"found": out.found, "killed": out.killed, "version_id": out.version_id,
-                "version": out.version, "endpoint": out.endpoint}  # fmt: skip
+        return {
+            "found": out.found,
+            "killed": out.killed,
+            "version_id": out.version_id,
+            "version": out.version,
+            "endpoint": out.endpoint,
+        }

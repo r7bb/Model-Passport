@@ -24,8 +24,12 @@ from model_passport.core.schema import (
 from model_passport.llm.project import POLICY_TEMPLATE
 from model_passport.policy.engine import Policy, evaluate
 
-ENTITY_RULES = {"entity_critical_max", "entity_high_max", "el_mia_auc_max",
-                "el_mia_tpr_at_1pct_fpr_max"}  # fmt: skip
+ENTITY_RULES = {
+    "entity_critical_max",
+    "entity_high_max",
+    "el_mia_auc_max",
+    "el_mia_tpr_at_1pct_fpr_max",
+}
 
 
 def default_policy() -> tuple[Policy, str]:

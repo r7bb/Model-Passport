@@ -258,3 +258,79 @@ def test_sign_in_and_tenant_resolution(platform: Platform) -> None:
     p.call("GET", "/models", who["ups_admin"], 403)  # suspended organizations are locked
     assert p.call("GET", "/platform/audit-log/verify", root)["intact"] is True
     assert p.client.get("/health").json()["status"] == "ok"
+
+
+def test_canary_testers_can_block_approval(platform: Platform) -> None:
+    from model_passport.platform.db import ALL_TENANTS, scoped_session
+    from model_passport.platform.models import ModelVersion, Role, State
+
+    p = platform
+    who = _setup_org(p)
+    p.call(
+        "POST",
+        "/members",
+        who["admin"],
+        201,
+        json={"email": "tester@usps.test", "password": PASSWORD, "role": "canary_tester"},
+    )
+    tester = p.login("tester@usps.test", "usps")
+    corpus = p.tmp / "c.jsonl"
+    write_corpus(synthetic.corpus(20, seed=1), corpus)
+    dataset = p.call(
+        "POST",
+        "/datasets",
+        who["eng"],
+        201,
+        files={"file": ("c.jsonl", corpus.read_bytes())},
+        data={"name": "d"},
+    )
+    model = p.call(
+        "POST",
+        "/models",
+        who["eng"],
+        201,
+        json={"name": "m", "access": "api", "base": "anthropic:claude-sonnet-5"},
+    )
+    version = p.call(
+        "POST",
+        f"/models/{model['id']}/versions",
+        who["eng"],
+        201,
+        json={"reference_dataset_id": dataset["id"]},
+    )
+    with scoped_session(p.worker.factory, ALL_TENANTS) as s:
+        row = s.get(ModelVersion, version["id"])
+        assert row is not None
+        row.state = State.CLEAN  # as if a clean audit had just finished
+    vid = version["id"]
+    p.call(
+        "POST",
+        f"/versions/{vid}/test-reports",
+        tester,
+        409,
+        json={"prompt_count": 5, "leaks_found": 0},
+    )
+    p.call("POST", f"/versions/{vid}/transition", who["eng"], json={"to": "canary"})
+    p.call(
+        "POST",
+        f"/versions/{vid}/test-reports",
+        who["eng"],
+        403,
+        json={"prompt_count": 1, "leaks_found": 0},
+    )
+    p.call(
+        "POST",
+        f"/versions/{vid}/test-reports",
+        tester,
+        201,
+        json={"prompt_count": 40, "leaks_found": 1, "summary": "prefix attack surfaced an email"},
+    )
+    p.call("POST", f"/versions/{vid}/transition", who["eng"], json={"to": "verifying"})
+    blocked = p.client.post(
+        f"/api/v1/versions/{vid}/approvals", headers=who["auditor"], json={"decision": "approve"}
+    )
+    assert blocked.status_code == 409
+    assert "canary testers reported leaks" in blocked.text
+    reports = p.call("GET", f"/versions/{vid}/test-reports", who["auditor"])
+    assert reports[0]["leaks_found"] == 1
+    assert Role.CANARY_TESTER.value == "canary_tester"

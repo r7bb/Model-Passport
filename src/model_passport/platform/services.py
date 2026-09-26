@@ -61,8 +61,15 @@ def create_tenant(
     session.add(tenant)
     session.flush()
     tenant.wrapped_key = wrap_key(master_key, new_data_key(), tenant.id)
-    auditlog.record(session, auditlog.PLATFORM, actor, "tenant.created", "tenant", tenant.id,
-                    {"slug": slug, "plan": plan.value})  # fmt: skip
+    auditlog.record(
+        session,
+        auditlog.PLATFORM,
+        actor,
+        "tenant.created",
+        "tenant",
+        tenant.id,
+        {"slug": slug, "plan": plan.value},
+    )
     return tenant
 
 
@@ -91,8 +98,9 @@ def create_user(
         raise ServiceError(f"passwords need at least {MIN_PASSWORD} characters")
     if session.scalars(select(User).where(User.email == email)).first():
         raise ServiceError(f"{email} already has an account")
-    user = User(email=email, name=name, password_hash=hash_password(password),
-                is_super_admin=super_admin)  # fmt: skip
+    user = User(
+        email=email, name=name, password_hash=hash_password(password), is_super_admin=super_admin
+    )
     session.add(user)
     session.flush()
     return user
@@ -107,20 +115,41 @@ def add_member(
     if existing is not None:
         before = existing.role
         existing.role = role
-        auditlog.record(session, tenant.id, actor, "member.role_changed", "user", user.id,
-                        {"from": before.value, "to": role.value})  # fmt: skip
+        auditlog.record(
+            session,
+            tenant.id,
+            actor,
+            "member.role_changed",
+            "user",
+            user.id,
+            {"from": before.value, "to": role.value},
+        )
         return existing
     membership = Membership(tenant_id=tenant.id, user_id=user.id, role=role)
     session.add(membership)
     session.flush()
-    auditlog.record(session, tenant.id, actor, "member.added", "user", user.id,
-                    {"email": user.email, "role": role.value})  # fmt: skip
+    auditlog.record(
+        session,
+        tenant.id,
+        actor,
+        "member.added",
+        "user",
+        user.id,
+        {"email": user.email, "role": role.value},
+    )
     return membership
 
 
 def remove_member(session: Session, membership: Membership, actor: Actor) -> None:
-    auditlog.record(session, membership.tenant_id, actor, "member.removed", "user",
-                    membership.user_id, {"role": membership.role.value})  # fmt: skip
+    auditlog.record(
+        session,
+        membership.tenant_id,
+        actor,
+        "member.removed",
+        "user",
+        membership.user_id,
+        {"role": membership.role.value},
+    )
     session.delete(membership)
 
 
@@ -142,9 +171,14 @@ CONSENT = {"obtained", "not-required", "unknown"}
 
 
 def add_dataset(
-    session: Session, files: TenantStore, tenant: Tenant, name: str, content: bytes,
-    provenance: Provenance, actor: Actor,
-) -> Dataset:  # fmt: skip
+    session: Session,
+    files: TenantStore,
+    tenant: Tenant,
+    name: str,
+    content: bytes,
+    provenance: Provenance,
+    actor: Actor,
+) -> Dataset:
     """Store a training corpus (encrypted) with where it came from and its consent basis."""
     from model_passport.llm.entities import load_corpus  # noqa: PLC0415 - optional extra
 
@@ -165,57 +199,114 @@ def add_dataset(
     key = f"datasets/{digest}.jsonl"
     files.put(key, content)
     dataset = Dataset(
-        tenant_id=tenant.id, name=name, source=provenance.source, license=provenance.license,
-        consent=provenance.consent, sha256=digest, size_bytes=len(content), object_key=key,
-        records=len(records), entities=sum(len(r.entities) for r in records),
+        tenant_id=tenant.id,
+        name=name,
+        source=provenance.source,
+        license=provenance.license,
+        consent=provenance.consent,
+        sha256=digest,
+        size_bytes=len(content),
+        object_key=key,
+        records=len(records),
+        entities=sum(len(r.entities) for r in records),
         created_by=actor.id,
-    )  # fmt: skip
+    )
     session.add(dataset)
     session.flush()
-    auditlog.record(session, tenant.id, actor, "dataset.added", "dataset", dataset.id,
-                    {"name": name, "sha256": digest, "records": dataset.records,
-                     "license": provenance.license, "consent": provenance.consent})  # fmt: skip
+    auditlog.record(
+        session,
+        tenant.id,
+        actor,
+        "dataset.added",
+        "dataset",
+        dataset.id,
+        {
+            "name": name,
+            "sha256": digest,
+            "records": dataset.records,
+            "license": provenance.license,
+            "consent": provenance.consent,
+        },
+    )
     return dataset
 
 
 def register_model(
-    session: Session, tenant: Tenant, name: str, access: Access, base: str, description: str,
+    session: Session,
+    tenant: Tenant,
+    name: str,
+    access: Access,
+    base: str,
+    description: str,
     actor: Actor,
-) -> Model:  # fmt: skip
+) -> Model:
     if session.scalars(
         select(Model).where(Model.tenant_id == tenant.id, Model.name == name)
     ).first():
         raise ServiceError(f"model {name!r} already exists")
-    model = Model(tenant_id=tenant.id, name=name, access=access, base=base,
-                  description=description, created_by=actor.id)  # fmt: skip
+    model = Model(
+        tenant_id=tenant.id,
+        name=name,
+        access=access,
+        base=base,
+        description=description,
+        created_by=actor.id,
+    )
     session.add(model)
     session.flush()
-    auditlog.record(session, tenant.id, actor, "model.registered", "model", model.id,
-                    {"name": name, "access": access.value, "base": base})  # fmt: skip
+    auditlog.record(
+        session,
+        tenant.id,
+        actor,
+        "model.registered",
+        "model",
+        model.id,
+        {"name": name, "access": access.value, "base": base},
+    )
     return model
 
 
 def register_version(
-    session: Session, model: Model, version: str, dataset: Dataset | None, reference: Dataset,
-    actor: Actor, artifact: tuple[str, str] | None = None, parent: ModelVersion | None = None,
-) -> ModelVersion:  # fmt: skip
+    session: Session,
+    model: Model,
+    version: str,
+    dataset: Dataset | None,
+    reference: Dataset,
+    actor: Actor,
+    artifact: tuple[str, str] | None = None,
+    parent: ModelVersion | None = None,
+) -> ModelVersion:
     """Record which data trained which model: the lineage behind the diligence report."""
     if any(v.version == version for v in model.versions):
         raise ServiceError(f"{model.name} already has version {version}")
     row = ModelVersion(
-        tenant_id=model.tenant_id, model_id=model.id, version=version,
-        dataset_id=dataset.id if dataset else None, reference_dataset_id=reference.id,
+        tenant_id=model.tenant_id,
+        model_id=model.id,
+        version=version,
+        dataset_id=dataset.id if dataset else None,
+        reference_dataset_id=reference.id,
         artifact_key=artifact[0] if artifact else None,
         artifact_sha256=artifact[1] if artifact else None,
-        parent_id=parent.id if parent else None, created_by=actor.id,
-    )  # fmt: skip
+        parent_id=parent.id if parent else None,
+        created_by=actor.id,
+    )
     model.versions.append(row)  # keeps the loaded relationship in sync
     session.flush()
-    auditlog.record(session, model.tenant_id, actor, "version.registered", "model_version",
-                    row.id, {"model": model.name, "version": version,
-                             "dataset": dataset.sha256 if dataset else None,
-                             "reference": reference.sha256,
-                             "parent": parent.version if parent else None})  # fmt: skip
+    auditlog.record(
+        session,
+        model.tenant_id,
+        actor,
+        "version.registered",
+        "model_version",
+        row.id,
+        {
+            "model": model.name,
+            "version": version,
+            "dataset": dataset.sha256 if dataset else None,
+            "reference": reference.sha256,
+            "parent": parent.version if parent else None,
+        },
+    )
     return row
 
 
