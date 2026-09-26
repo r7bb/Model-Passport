@@ -311,3 +311,28 @@ def test_failed_jobs_return_versions_to_an_actionable_state(
         assert failed.status is JobStatus.FAILED
         assert "must be trained" in (failed.error or "")
         assert s.get(ModelVersion, version_id).state is State.REGISTERED  # type: ignore[union-attr]
+
+
+def test_login_throttle_limits_guessing_per_account() -> None:
+    from model_passport.platform.security import LoginThrottle
+
+    throttle = LoginThrottle(per_account=3, window=60)
+    for _ in range(3):
+        assert throttle.retry_after("a@x.test", "1.1.1.1", now=0) == 0
+        throttle.failed("a@x.test", "1.1.1.1", now=0)
+    assert throttle.retry_after("a@x.test", "2.2.2.2", now=10) == 51  # any address
+    assert throttle.retry_after("b@x.test", "1.1.1.1", now=10) == 0  # other accounts unaffected
+    assert throttle.retry_after("a@x.test", "1.1.1.1", now=61) == 0  # window passed
+    throttle.failed("a@x.test", "1.1.1.1", now=70)
+    throttle.succeeded("a@x.test")
+    assert throttle.retry_after("a@x.test", "1.1.1.1", now=70) == 0
+
+
+def test_login_throttle_per_client_limit_when_enabled() -> None:
+    from model_passport.platform.security import LoginThrottle
+
+    throttle = LoginThrottle(per_account=100, per_client=2, window=60)
+    throttle.failed("a@x.test", "9.9.9.9", now=0)
+    throttle.failed("b@x.test", "9.9.9.9", now=0)
+    assert throttle.retry_after("c@x.test", "9.9.9.9", now=1) > 0
+    assert throttle.retry_after("c@x.test", "8.8.8.8", now=1) == 0

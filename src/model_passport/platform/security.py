@@ -11,6 +11,9 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
+from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -88,3 +91,50 @@ def wrap_key(master: bytes, data_key: bytes, tenant_id: str) -> bytes:
 
 def unwrap_key(master: bytes, wrapped: bytes, tenant_id: str) -> bytes:
     return decrypt(master, wrapped, b"tenant-key:" + tenant_id.encode())
+
+
+class LoginThrottle:
+    """Limit failed sign-ins per account and per client address (sliding window).
+
+    Stops password guessing: after ``per_account`` failures for one email, or ``per_client``
+    from one address, within ``window`` seconds, further attempts are refused until the oldest
+    failure ages out. A successful sign-in clears that account's failures. State is per
+    process; behind several replicas, pair it with a limit at the gateway or load balancer.
+
+    The per-address limit is off by default (``per_client=0``): behind the web app or a proxy
+    every sign-in arrives from the same address, and one attacker could lock everyone out.
+    """
+
+    def __init__(self, per_account: int = 5, per_client: int = 0, window: float = 900.0) -> None:
+        self.limits = {"account": per_account, "client": per_client}
+        self.window = window
+        self._failures: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def _keys(self, email: str, client: str) -> dict[str, str]:
+        return {"account": f"account:{email}", "client": f"client:{client}"}
+
+    def retry_after(self, email: str, client: str, now: float | None = None) -> int:
+        """Seconds until another attempt is allowed (0 if allowed now)."""
+        now = time.monotonic() if now is None else now
+        wait = 0.0
+        with self._lock:
+            for kind, key in self._keys(email, client).items():
+                if self.limits[kind] <= 0:
+                    continue
+                failures = self._failures[key]
+                while failures and failures[0] <= now - self.window:
+                    failures.popleft()
+                if len(failures) >= self.limits[kind]:
+                    wait = max(wait, failures[0] + self.window - now)
+        return int(wait) + 1 if wait > 0 else 0
+
+    def failed(self, email: str, client: str, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            for key in self._keys(email, client).values():
+                self._failures[key].append(now)
+
+    def succeeded(self, email: str) -> None:
+        with self._lock:
+            self._failures.pop(f"account:{email}", None)

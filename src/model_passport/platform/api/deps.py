@@ -9,7 +9,7 @@ security applies to everything it does.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -23,7 +23,7 @@ from model_passport.platform.controlplane import ControlPlane
 from model_passport.platform.db import ALL_TENANTS, scoped_session
 from model_passport.platform.models import Membership, Role, Tenant, TenantStatus, User
 from model_passport.platform.rbac import Permission, allowed
-from model_passport.platform.security import TokenError, read_token
+from model_passport.platform.security import LoginThrottle, TokenError, read_token
 from model_passport.platform.settings import Settings
 from model_passport.platform.storage import ObjectStore, TenantStore
 
@@ -35,6 +35,7 @@ class AppState:
     settings: Settings
     factory: sessionmaker[Session]
     store: ObjectStore
+    logins: LoginThrottle = field(default_factory=LoginThrottle)
 
 
 def state(request: Request) -> AppState:

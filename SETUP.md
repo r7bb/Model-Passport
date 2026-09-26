@@ -303,6 +303,10 @@ cd web && npm ci && npm run dev                     # then sign in at http://loc
 
 Sign in as `root@platform.example` for the platform console, or as any printed account to see that role's view. `python scripts/web_screenshots.py` refreshes the README screenshots from this demo.
 
+### Sign-in protection
+
+After 5 wrong passwords for one account within 15 minutes, sign-in for that account is refused (HTTP 429, with a Retry-After header) until the oldest failure is 15 minutes old. A correct password clears the count. The limit is kept per backend process, so with several replicas add a rate limit at the load balancer as well.
+
 ### How organizations are kept apart
 
 - **In the database:** PostgreSQL row-level security. Every transaction is limited to one organization, so even a query that forgets its filter cannot read another organization's rows. A session with no organization set sees nothing.

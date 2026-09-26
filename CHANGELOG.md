@@ -9,6 +9,7 @@ MP becomes an entity-level PII leakage auditing and remediation platform (phase 
 - `passport llm sanitize` (surrogate, mask, or drop) and `passport llm finetune` (safetensors) for the remediation loop; `passport llm demo-corpus` for synthetic data.
 - `passport init --llm` and `passport llm remediate` (phase B): a project that tests, sanitizes, retrains, and re-tests as new signed versions (1.0.0 → 1.1.0 → ...) until the release gate passes. Remediation escalates from single values to whole types when a type keeps leaking.
 - The release gate for language models blocks confirmed High and Critical findings.
+- Sign-in is limited to 5 failed attempts per account in 15 minutes (429 with Retry-After); a per-address limit is available for deployments that see real client addresses.
 - Held-out calibration: models trained on the platform never see a stable 15% of records (chosen by record id, so remediation rounds hold out the same ones). Audits use those real entities as the null instead of synthetic look-alikes, removing false alarms from distribution shift, and report `holdout_auc` and `control_shift_auc`.
 - The web app (phase E, `web/`): a Next.js super-admin console and organization dashboard for modules M1–M9, with each lifecycle step available by role. Login tokens stay in httpOnly cookies, and organization subdomains are supported. Findings pages list the riskiest 50 first.
 - `scripts/demo_platform.py` runs the whole platform on a made-up organization; `scripts/web_screenshots.py` refreshes the README screenshots.

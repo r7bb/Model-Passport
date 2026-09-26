@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -32,11 +32,19 @@ Admin = Annotated[tuple[Session, User], Depends(super_admin)]
 
 
 @router.post("/auth/login", response_model=Token, tags=["auth"])
-def login(body: Login, app: State) -> Token:
+def login(body: Login, app: State, request: Request) -> Token:
+    email = body.email.strip().lower()
+    client = request.client.host if request.client else "unknown"
+    wait = app.logins.retry_after(email, client)
+    if wait:
+        headers = {"Retry-After": str(wait)}
+        raise HTTPException(429, "too many failed sign-ins; try again later", headers=headers)
     with scoped_session(app.factory, ALL_TENANTS) as session:
-        user = session.scalars(select(User).where(User.email == body.email.strip().lower())).first()
+        user = session.scalars(select(User).where(User.email == email)).first()
         if user is None or user.disabled or not verify_password(user.password_hash, body.password):
+            app.logins.failed(email, client)
             raise HTTPException(401, "wrong email or password")
+        app.logins.succeeded(email)
         minutes = app.settings.token_minutes
         token = issue_token(user.id, user.is_super_admin, app.settings.jwt_secret, minutes)
     return Token(access_token=token, expires_in_minutes=minutes)

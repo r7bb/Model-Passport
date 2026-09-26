@@ -242,6 +242,9 @@ def test_the_full_product_flow(platform: Platform) -> None:
 
 def test_sign_in_and_tenant_resolution(platform: Platform) -> None:
     p = platform
+    for _ in range(5):
+        p.call("POST", "/auth/login", {}, 401, json={"email": "x@mp.test", "password": "nope"})
+    p.call("POST", "/auth/login", {}, 429, json={"email": "x@mp.test", "password": "nope"})
     p.call("POST", "/auth/login", {}, 401, json={"email": "root@mp.test", "password": "nope"})
     p.call("GET", "/me", {}, 401)
     who = _setup_org(p)

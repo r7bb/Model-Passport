@@ -85,7 +85,7 @@ The backend calls the control plane for canary, release, rollback, and kill. Int
 
 From the 2026-09-26 review, in order:
 1. **Accuracy.** Held-out calibration is done. Next: a benchmark on public data (AI4Privacy) with real open models (Pythia, GPT-2), planted canaries at known repeat counts, and published detection and false-alarm rates; model-based detection of names and addresses in unlabeled text (GLiNER or Presidio) with measured precision and recall.
-2. **Security.** Login attempt limits, token revocation on sign-out, SSO and MFA, invites and password reset, and anchoring the audit-log head outside the database.
+2. **Security.** Login attempt limits are done (5 failures per account per 15 minutes). Next: token revocation on sign-out, SSO and MFA, invites and password reset, and anchoring the audit-log head outside the database.
 3. **Bring your own training.** Export the sanitized dataset with a signed change record, retrain anywhere, then register and re-audit; output filtering for API models.
 4. **Large uploads** straight to storage with pre-signed URLs.
 
