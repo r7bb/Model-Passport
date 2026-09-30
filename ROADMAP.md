@@ -1,10 +1,30 @@
 # MP roadmap
 
-MP (Model Passport) is an entity-level PII leakage auditing and remediation platform: it finds personal data a model memorized, removes it, verifies the fix, and records every step in a signed passport. It builds on EL-MIA (Satvaty et al., LREC 2026) and the AIPassport framework (Kalokyri et al., arXiv 2506.22358).
+MP (Model Passport) is a **privacy layer between an app and the AI models it uses**. It stops personal data from reaching a model, blocks replies that leak it, and proves the company's own models don't leak it either. It builds on EL-MIA (Satvaty et al., LREC 2026) and the AIPassport framework (Kalokyri et al., arXiv 2506.22358).
+
+## Direction (decided 2026-09-29)
+
+MP becomes a privacy gateway for **small and mid-sized companies building AI apps and agents**, sold as a subscription with a free tier. Individual users come later, if at all, as a free way to get noticed (a browser extension); they rarely pay for privacy, and general AI firewalls already offer that for free.
+
+Generic AI firewalls such as PromptGuard, Lakera, Model Armor, and Bedrock Guardrails cover prompt injection, jailbreaks, and generic PII filtering. MP competes on **privacy depth** instead:
+1. **It knows what your model memorized.** The entity audit finds exactly which people's details a company's fine-tuned model memorized, and the gateway blocks those values specifically. A generic filter can only block all names or none.
+2. **Before and after in one place.** The model is certified before release and guarded at runtime, with one signed, tamper-evident record for auditors, investors, and buyers.
+3. **A health-care focus first.** Small clinics and health startups need every vendor that touches patient data to sign a BAA. MP aims to be HIPAA-ready and sign BAAs on small plans.
+
+Before building far, talk to 5–10 potential customers (health and legal startups that fine-tune models) to check they would pay for this.
+
+| Phase | Delivers |
+|---|---|
+| H1. Guard gateway (**next**) | A drop-in, OpenAI-compatible endpoint: apps change only the address they send AI requests to. Personal data in requests is swapped for placeholders, so the model never sees it, and restored in the reply. Replies are scanned, and values the audit found memorized are blocked. Organization API keys, the upstream provider's key stored encrypted, a policy per data type (mask, block, or allow), and masked-only request logs. |
+| H2. Guard in the web app | API keys, provider settings, policies, live traffic (requests, values masked by type, blocks), and a playground |
+| H3. Detection quality | Names, addresses, and other free-text values found by a model (GLiNER or Presidio), with measured precision and recall and a latency budget of about 20 ms |
+| H4. Agents and streaming | Streaming replies, tool calls and tool results, and a scan API for agent frameworks |
+| H5. Plans and billing | Free, Pro, and Team plans with usage metering; model audits included from Pro |
+| H6. Compliance | A HIPAA program, BAAs, a zero-retention mode, and a SOC 2 path |
 
 ## Where things stand
 
-The passport engine (phases 1–7) and platform phases A–E are done, with Python, Go, and web tests, strict ruff, mypy, ESLint, and TypeScript, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the Go services, the web app, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. Phases F and G are next.
+The passport engine (phases 1–7) and platform phases A–E are done, with Python, Go, and web tests, strict ruff, mypy, ESLint, and TypeScript, and green CI. CI covers lint, tests on Python 3.11 and 3.12, the Go services, the web app, the demo lifecycle, the wheel, the GitHub Action, and the Docker stack. The guard gateway (H1–H6 above) comes next. Phases F and G are folded into it: the gateway is the release path, and G ships it.
 
 | Phase | What it delivers |
 |---|---|
