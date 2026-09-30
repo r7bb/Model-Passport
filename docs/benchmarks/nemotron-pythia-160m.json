@@ -1,0 +1,234 @@
+{
+  "model": "EleutherAI/pythia-160m",
+  "data": "Nemotron-PII by NVIDIA, licensed under CC BY 4.0",
+  "documents": {
+    "trained": 889,
+    "calibration": 307,
+    "unseen": 304
+  },
+  "fine_tuning": {
+    "epochs": 3,
+    "learning_rate": 5e-05,
+    "repeats": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "loss": [
+      1.8948,
+      0.9333,
+      0.6149
+    ],
+    "seconds": 672.3
+  },
+  "fdr": 0.05,
+  "before_fine_tuning": {
+    "look_alikes": {
+      "calibration": "synthetic",
+      "seconds": 258.8,
+      "primary_method": "reference_set_suffix",
+      "holdout_auc": null,
+      "control_shift_auc": null,
+      "detected": {
+        "flagged": 249,
+        "of": 904,
+        "rate": 0.2754
+      },
+      "detected_by_repeats": {
+        "1": {
+          "flagged": 64,
+          "of": 255,
+          "rate": 0.251
+        },
+        "2": {
+          "flagged": 66,
+          "of": 236,
+          "rate": 0.2797
+        },
+        "4": {
+          "flagged": 59,
+          "of": 210,
+          "rate": 0.281
+        },
+        "8": {
+          "flagged": 60,
+          "of": 203,
+          "rate": 0.2956
+        }
+      },
+      "false_alarms": {
+        "flagged": 79,
+        "of": 296,
+        "rate": 0.2669
+      },
+      "high_or_critical": {
+        "trained": {
+          "flagged": 30,
+          "of": 904,
+          "rate": 0.0332
+        },
+        "unseen": {
+          "flagged": 9,
+          "of": 296,
+          "rate": 0.0304
+        }
+      }
+    },
+    "held_out": {
+      "calibration": "holdout",
+      "seconds": 105.6,
+      "primary_method": "reference_set_suffix",
+      "holdout_auc": 0.5016,
+      "control_shift_auc": 0.6561,
+      "detected": {
+        "flagged": 93,
+        "of": 904,
+        "rate": 0.1029
+      },
+      "detected_by_repeats": {
+        "1": {
+          "flagged": 25,
+          "of": 255,
+          "rate": 0.098
+        },
+        "2": {
+          "flagged": 25,
+          "of": 236,
+          "rate": 0.1059
+        },
+        "4": {
+          "flagged": 25,
+          "of": 210,
+          "rate": 0.119
+        },
+        "8": {
+          "flagged": 18,
+          "of": 203,
+          "rate": 0.0887
+        }
+      },
+      "false_alarms": {
+        "flagged": 33,
+        "of": 296,
+        "rate": 0.1115
+      },
+      "high_or_critical": {
+        "trained": {
+          "flagged": 18,
+          "of": 904,
+          "rate": 0.0199
+        },
+        "unseen": {
+          "flagged": 4,
+          "of": 296,
+          "rate": 0.0135
+        }
+      }
+    }
+  },
+  "after_fine_tuning": {
+    "look_alikes": {
+      "calibration": "synthetic",
+      "seconds": 456.4,
+      "primary_method": "reference_set",
+      "holdout_auc": null,
+      "control_shift_auc": null,
+      "detected": {
+        "flagged": 801,
+        "of": 904,
+        "rate": 0.8861
+      },
+      "detected_by_repeats": {
+        "1": {
+          "flagged": 192,
+          "of": 255,
+          "rate": 0.7529
+        },
+        "2": {
+          "flagged": 210,
+          "of": 236,
+          "rate": 0.8898
+        },
+        "4": {
+          "flagged": 202,
+          "of": 210,
+          "rate": 0.9619
+        },
+        "8": {
+          "flagged": 197,
+          "of": 203,
+          "rate": 0.9704
+        }
+      },
+      "false_alarms": {
+        "flagged": 122,
+        "of": 296,
+        "rate": 0.4122
+      },
+      "high_or_critical": {
+        "trained": {
+          "flagged": 269,
+          "of": 904,
+          "rate": 0.2976
+        },
+        "unseen": {
+          "flagged": 30,
+          "of": 296,
+          "rate": 0.1014
+        }
+      }
+    },
+    "held_out": {
+      "calibration": "holdout",
+      "seconds": 183.4,
+      "primary_method": "reference_set",
+      "holdout_auc": 0.7026,
+      "control_shift_auc": 0.7677,
+      "detected": {
+        "flagged": 269,
+        "of": 904,
+        "rate": 0.2976
+      },
+      "detected_by_repeats": {
+        "1": {
+          "flagged": 56,
+          "of": 255,
+          "rate": 0.2196
+        },
+        "2": {
+          "flagged": 56,
+          "of": 236,
+          "rate": 0.2373
+        },
+        "4": {
+          "flagged": 72,
+          "of": 210,
+          "rate": 0.3429
+        },
+        "8": {
+          "flagged": 85,
+          "of": 203,
+          "rate": 0.4187
+        }
+      },
+      "false_alarms": {
+        "flagged": 23,
+        "of": 296,
+        "rate": 0.0777
+      },
+      "high_or_critical": {
+        "trained": {
+          "flagged": 126,
+          "of": 904,
+          "rate": 0.1394
+        },
+        "unseen": {
+          "flagged": 7,
+          "of": 296,
+          "rate": 0.0236
+        }
+      }
+    }
+  }
+}

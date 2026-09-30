@@ -177,6 +177,27 @@ rules:
 
 How the tests work is explained in [section 11](#how-language-models-are-audited).
 
+### Public test data and the accuracy benchmark
+
+To try MP on realistic documents without your own data, use **Nemotron-PII** (NVIDIA, [CC BY 4.0](https://huggingface.co/datasets/nvidia/Nemotron-PII), commercial use allowed with attribution). It has 100,000 documents across industries, such as medical records, visa forms, and bank letters, with every personal value labeled. The people in it are synthetic.
+
+```python
+from pathlib import Path
+from model_passport.llm.entities import write_corpus
+from model_passport.llm.public_data import download_nemotron, nemotron_records
+
+path = download_nemotron(Path(".cache/public-data"))  # about 150 MB, once
+write_corpus(nemotron_records(path, limit=2000), Path("corpus.jsonl"))
+```
+
+`scripts/benchmark.py` measures how accurate the audit is on this data with a real open model. It fine-tunes the model on part of the documents, each repeated 1, 2, 4, or 8 times, and keeps two other parts out of training. It then audits trained and never-seen documents together. Ground truth is known, so it reports how many trained values are caught and how many never-seen values are wrongly flagged, before and after fine-tuning, with look-alike and with held-out calibration:
+
+```bash
+python scripts/benchmark.py --model EleutherAI/pythia-160m --docs 1500   # writes docs/benchmarks/
+```
+
+AI4Privacy datasets also load as-is, but their license allows academic, non-commercial use only.
+
 ---
 
 ## 3. Run the platform

@@ -243,6 +243,23 @@ def test_saved_models_reload_and_hash_as_directories(
     assert identity.sha256_path(directory) != digest
 
 
+def test_half_precision_checkpoints_load_in_full_precision(tmp_path: Path) -> None:
+    """16-bit weights blur membership scores and make fine-tuning overflow to NaN."""
+    import torch
+
+    from model_passport.llm import training
+    from model_passport.llm.backends import HuggingFaceModel
+
+    texts = ["Refund jane@example.com today", "Call 555-0100 about invoice 4419"] * 4
+    model = training.tiny_model(texts, seed=0)
+    model.model.half()
+    directory = training.save(model, tmp_path / "half")
+    reloaded = HuggingFaceModel.load(directory, device="cpu")
+    assert next(reloaded.model.parameters()).dtype == torch.float32
+    losses = training.finetune(reloaded, texts, training.TrainSettings(epochs=2, device="cpu"))
+    assert all(np.isfinite(losses))
+
+
 # --- Generation-only models ----------------------------------------------------------------------
 
 

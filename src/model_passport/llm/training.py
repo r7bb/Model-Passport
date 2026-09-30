@@ -17,6 +17,9 @@ import numpy as np
 
 from model_passport.llm.backends import HuggingFaceModel, ModelError, quiet_transformers
 
+PAD_MULTIPLE = 64
+RELEASE_EVERY = 50  # batches between returning cached GPU memory
+
 
 @dataclass(frozen=True)
 class TrainSettings:
@@ -76,6 +79,14 @@ def tiny_model(texts: Sequence[str], vocab_size: int = 2000, layers: int = 3, wi
     return HuggingFaceModel(GPT2LMHeadModel(config), wrapped, name="tiny-gpt2", device="cpu")
 
 
+def _release_cached_memory(torch: Any, device: str) -> None:
+    """Return memory cached by earlier scoring, which training needs (GPU and Apple MPS)."""
+    if device.startswith("cuda"):
+        torch.cuda.empty_cache()
+    elif device.startswith("mps"):
+        torch.mps.empty_cache()
+
+
 def finetune(
     model: HuggingFaceModel, texts: Sequence[str], settings: TrainSettings | None = None
 ) -> list[float]:
@@ -84,6 +95,7 @@ def finetune(
     s = settings or TrainSettings()
     seed_everything(s.seed)
     network, tokenizer = model.model, model.tokenizer
+    _release_cached_memory(torch, model.device)
     network.train()
     optimizer = torch.optim.AdamW(
         network.parameters(), lr=s.learning_rate, weight_decay=s.weight_decay
@@ -97,8 +109,15 @@ def finetune(
         losses = []
         for start in range(0, len(order), s.batch_size):
             batch = [rows[i] for i in order[start : start + s.batch_size]]
+            # A few fixed lengths instead of one per batch: GPU allocators (Apple MPS above
+            # all) cache a block per shape, and one shape per batch grows that without limit.
             encoded = tokenizer(
-                batch, return_tensors="pt", padding=True, truncation=True, max_length=s.max_length
+                batch,
+                return_tensors="pt",
+                padding=True,
+                pad_to_multiple_of=PAD_MULTIPLE,
+                truncation=True,
+                max_length=s.max_length,
             ).to(model.device)
             labels = encoded["input_ids"].masked_fill(encoded["attention_mask"] == 0, -100)
             loss = network(**encoded, labels=labels).loss
@@ -107,6 +126,8 @@ def finetune(
             torch.nn.utils.clip_grad_norm_(network.parameters(), 1.0)
             optimizer.step()
             losses.append(float(loss.detach()))
+            if len(losses) % RELEASE_EVERY == 0:
+                _release_cached_memory(torch, model.device)
         history.append(float(np.mean(losses)))
     network.eval()
     return history

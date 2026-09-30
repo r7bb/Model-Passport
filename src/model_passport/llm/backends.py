@@ -118,7 +118,10 @@ class HuggingFaceModel:
         quiet_transformers()
         try:
             tokenizer = AutoTokenizer.from_pretrained(str(source))
-            model = AutoModelForCausalLM.from_pretrained(str(source))
+            # Full precision: many checkpoints are stored in 16-bit, which Transformers 5 keeps
+            # by default. Membership scores are small log-probability differences that 16-bit
+            # rounding blurs, and fine-tuning in 16-bit overflows to NaN.
+            model = AutoModelForCausalLM.from_pretrained(str(source), dtype="float32")
         except (OSError, ValueError) as exc:
             raise ModelError(f"cannot load {source}: {exc}") from exc
         return cls(model, tokenizer, str(source), device, batch_size)
@@ -135,9 +138,11 @@ class HuggingFaceModel:
             ids = encoded["input_ids"].to(self.device)
             mask = encoded["attention_mask"].to(self.device)
             with torch.no_grad():
-                logits = self.model(input_ids=ids, attention_mask=mask).logits.float()
-            logprobs = torch.log_softmax(logits[:, :-1], dim=-1)
-            picked = logprobs.gather(2, ids[:, 1:, None])[..., 0].cpu().numpy()
+                logits = self.model(input_ids=ids, attention_mask=mask).logits[:, :-1].float()
+                # log softmax at the observed token only, without a vocabulary-sized copy
+                chosen = logits.gather(2, ids[:, 1:, None])[..., 0]
+                picked = (chosen - torch.logsumexp(logits, dim=-1)).cpu().numpy()
+                del logits
             for row, text_mask in enumerate(encoded["attention_mask"]):
                 length = int(text_mask.sum())
                 offsets = [tuple(o) for o in encoded["offset_mapping"][row][:length].tolist()]

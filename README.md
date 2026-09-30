@@ -104,6 +104,14 @@ After round two no single detail stood out, but the details as a group were stil
 
 MP also checks tabular models and datasets, with a [readable report](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/report-pass.png) and a [dashboard](https://raw.githubusercontent.com/r7bb/Model-Passport/main/docs/images/dashboard-privacy.png).
 
+## How accurate is it?
+
+We measured MP on a real open model (Pythia-160m) fine-tuned on 1,500 public documents (Nemotron-PII by NVIDIA, CC BY 4.0), where we know exactly what the model trained on. The honest summary:
+
+- Comparing against made-up look-alikes alone gives many false alarms on real models (27% even when nothing was memorized). So MP now compares against real records held back from training.
+- With that, false alarms drop to about 8%, and High or Critical false alarms to 2.4%. MP catches 30% of memorized details, and more the more often a detail was repeated (42% at 8 repeats).
+- The target is under 5% false alarms. The work to get there is listed in the [benchmark notes](https://github.com/r7bb/Model-Passport/blob/main/docs/benchmarks/README.md).
+
 ## What's ready, and what's coming
 
 | Ready now | Being built |

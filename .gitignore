@@ -32,3 +32,6 @@ htmlcov/
 
 # Go build output
 controlplane/bin/
+
+# Downloaded public datasets and model caches (never committed)
+.cache/

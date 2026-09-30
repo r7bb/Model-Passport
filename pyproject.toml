@@ -147,7 +147,7 @@ exclude = ["src/model_passport/platform/rpc/"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["picklescan.*", "joblib.*", "sklearn.*", "presidio_analyzer.*", "mlflow.*"]
+module = ["picklescan.*", "joblib.*", "sklearn.*", "presidio_analyzer.*", "mlflow.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
