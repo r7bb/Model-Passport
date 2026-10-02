@@ -4,7 +4,7 @@
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-**Find the personal data an AI model has memorized, remove it, prove it's gone, and only then release the model.**
+**Find the personal data an AI model has memorized, remove it, check that it's gone, and only then release the model.** (An attack score near 0.5 afterwards is evidence the data is no longer memorized, not proof.)
 
 ## Why it exists
 
@@ -13,7 +13,7 @@ AI language models learn from huge amounts of text, and that text often contains
 - **The research gap:** checks that ask "was this whole document in the training data?" miss single memorized details. Research published in 2026 (EL-MIA, LREC 2026) shows how to test each detail on its own.
 - **The market gap:** investors and buyers of AI companies now check where training data came from, and whether it creates privacy risk.
 
-MP checks every sensitive detail, removes the risk, verifies the fix, and records every step in a tamper-proof passport.
+MP checks every sensitive detail, removes the risk, verifies the fix, and records every step in a tamper-evident passport: signed, so anyone can verify nothing was changed.
 
 ## How it works
 
@@ -44,7 +44,7 @@ Every step is signed and logged, so an auditor, investor, or buyer can check the
 
 ## See it in action
 
-These screenshots are from the real app. MP runs on your real training data and your real models; for the screenshots, and in every demo and test, it uses realistic made-up people instead, so no real person's data is ever shown or stored in this project. A made-up clinic, "Northwind Health", trained a support assistant on 300 made-up tickets. MP found what the model had memorized, cleaned the data, retrained, checked again, and released the fixed version.
+These screenshots are from the real app. MP runs on your real training data and your real models; for the screenshots, and in every demo and test, it uses realistic made-up people instead, so the demos, tests, and screenshots in this repository never show or store a real person's data. A made-up clinic, "Northwind Health", trained a support assistant on 300 made-up tickets. MP found what the model had memorized, cleaned the data, retrained, checked again, and released the fixed version.
 
 **1. See where every model stands.** Each organization gets its own dashboard, showing models in each stage and anything blocked by the kill switch.
 
