@@ -16,14 +16,22 @@ from model_passport.platform.models import (
     TenantStatus,
 )
 
+# Upper bounds on incoming strings, so one request cannot carry megabytes into hashing or storage.
+MAX_EMAIL_LENGTH = 254  # the RFC 5321 path limit
+MAX_PASSWORD_LENGTH = 1024  # generous for passphrases; bounds the Argon2id hashing cost
+MAX_NAME_LENGTH = 200  # people, organizations, and model names
+MAX_SLUG_LENGTH = 63  # a DNS label: tenants map to subdomains (see services.SLUG_RE)
+MAX_UPSTREAM_URL_LENGTH = 2048
+MAX_UPSTREAM_KEY_LENGTH = 4096  # provider keys can be long JWT-style tokens
+
 
 class _Out(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
 class Login(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=MAX_EMAIL_LENGTH)
+    password: str = Field(max_length=MAX_PASSWORD_LENGTH)
 
 
 class Token(BaseModel):
@@ -46,8 +54,8 @@ class Me(BaseModel):
 
 
 class TenantIn(BaseModel):
-    slug: str
-    name: str
+    slug: str = Field(max_length=MAX_SLUG_LENGTH)
+    name: str = Field(max_length=MAX_NAME_LENGTH)
     plan: Plan = Plan.FREE
 
 
@@ -67,11 +75,13 @@ class TenantOut(_Out):
 
 
 class MemberIn(BaseModel):
-    email: str
+    email: str = Field(max_length=MAX_EMAIL_LENGTH)
     role: Role
-    name: str = ""
+    name: str = Field(default="", max_length=MAX_NAME_LENGTH)
     password: str | None = Field(
-        default=None, description="Needed only when the person has no account yet."
+        default=None,
+        max_length=MAX_PASSWORD_LENGTH,
+        description="Needed only when the person has no account yet.",
     )
 
 
@@ -207,11 +217,16 @@ class TestReportOut(_Out):
 
 
 class GuardSettingsIn(BaseModel):
-    upstream_url: str = Field(description="The AI provider's OpenAI-compatible address.")
-    upstream_key: str | None = Field(
-        default=None, description="The provider's API key; omit to keep it, empty to remove it."
+    upstream_url: str = Field(
+        max_length=MAX_UPSTREAM_URL_LENGTH,
+        description="The AI provider's OpenAI-compatible address.",
     )
-    default_model: str = ""
+    upstream_key: str | None = Field(
+        default=None,
+        max_length=MAX_UPSTREAM_KEY_LENGTH,
+        description="The provider's API key; omit to keep it, empty to remove it.",
+    )
+    default_model: str = Field(default="", max_length=MAX_NAME_LENGTH)
     policy: dict[str, Any] = Field(default_factory=dict)
 
 
