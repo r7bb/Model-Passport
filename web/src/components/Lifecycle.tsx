@@ -19,7 +19,7 @@ export function Lifecycle({
   superAdmin: boolean;
 }) {
   const steps = nextSteps(state, role, superAdmin);
-  if (steps.length === 0) return <span className="text-xs text-slate-400">No steps for your role</span>;
+  if (steps.length === 0) return <span className="text-xs text-slate-500">No steps for your role</span>;
   const hidden = { org, version: versionId };
   return (
     <div className="flex flex-wrap items-start gap-2">

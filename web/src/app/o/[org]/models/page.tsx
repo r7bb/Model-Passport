@@ -27,7 +27,7 @@ export default async function ModelsPage({ params }: PageProps<"/o/[org]/models"
               <tr key={m.id}>
                 <Td>
                   <TextLink href={`/o/${org}/models/${m.id}`}>{m.name}</TextLink>
-                  {m.description ? <div className="text-xs text-slate-400">{m.description}</div> : null}
+                  {m.description ? <div className="text-xs text-slate-500">{m.description}</div> : null}
                 </Td>
                 <Td>
                   <Badge tone={m.access === "api" ? "info" : "neutral"}>{m.access}</Badge>

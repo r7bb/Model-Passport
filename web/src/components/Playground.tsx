@@ -51,7 +51,7 @@ function Counts({ report }: { report: NonNullable<PlaygroundState>["report"] }) 
           <dd className="mt-1 font-semibold text-slate-900">
             {Object.values(counts ?? {}).reduce((a, b) => a + b, 0)}
           </dd>
-          <dd className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
+          <dd className="mt-0.5 truncate font-mono text-[11px] text-slate-500">
             {Object.keys(counts ?? {}).join(", ") || "—"}
           </dd>
         </div>

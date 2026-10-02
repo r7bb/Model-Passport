@@ -41,7 +41,7 @@ export default async function AdminPage() {
               <tr key={t.id}>
                 <Td>
                   <div className="font-medium text-slate-900">{t.name}</div>
-                  <div className="text-xs text-slate-400">{t.slug}</div>
+                  <div className="text-xs text-slate-500">{t.slug}</div>
                 </Td>
                 <Td mono>{base ? `${t.slug}.${base}` : `/o/${t.slug}`}</Td>
                 <Td>

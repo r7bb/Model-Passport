@@ -26,7 +26,7 @@ function DailyBars({ stats }: { stats: GuardStats }) {
           <div className="flex w-full flex-col-reverse overflow-hidden rounded-t bg-slate-100" style={{ height: "6rem" }}>
             <div className="bg-indigo-400" style={{ height: `${(100 * d.requests) / peak}%` }} title={`${d.day}: ${d.requests}`} />
           </div>
-          <span className="text-[11px] text-slate-400">{d.day.slice(5)}</span>
+          <span className="text-[11px] text-slate-500">{d.day.slice(5)}</span>
         </div>
       ))}
     </div>
@@ -36,7 +36,7 @@ function DailyBars({ stats }: { stats: GuardStats }) {
 function ByType({ counts }: { counts: Record<string, number> }) {
   const rows = Object.entries(counts);
   const peak = Math.max(1, ...rows.map(([, n]) => n));
-  if (rows.length === 0) return <p className="text-sm text-slate-400">Nothing caught yet.</p>;
+  if (rows.length === 0) return <p className="text-sm text-slate-500">Nothing caught yet.</p>;
   return (
     <ul className="space-y-2">
       {rows.map(([type, n]) => (
@@ -119,7 +119,7 @@ export default async function GuardPage({ params }: PageProps<"/o/[org]/guard">)
             </Td>
             <Td>
               {describeReport(e.report)}
-              {e.detail ? <span className="block text-xs text-slate-400">{e.detail}</span> : null}
+              {e.detail ? <span className="block text-xs text-slate-500">{e.detail}</span> : null}
             </Td>
             <Td mono>{e.latency_ms} ms</Td>
           </tr>

@@ -61,7 +61,7 @@ export default async function AnalyticsPage({ params }: PageProps<"/o/[org]/anal
         </div>
         <Card title="High-risk findings by data type">
           {types.length === 0 ? (
-            <p className="text-sm text-slate-400">None so far.</p>
+            <p className="text-sm text-slate-500">None so far.</p>
           ) : (
             <ul className="space-y-2">
               {types.map(([type, n]) => (

@@ -49,7 +49,7 @@ export default async function MembersPage({ params }: PageProps<"/o/[org]/member
               <tr key={m.user_id}>
                 <Td>
                   <div className="font-medium text-slate-900">{m.name || m.email}</div>
-                  <div className="text-xs text-slate-400">{m.email}</div>
+                  <div className="text-xs text-slate-500">{m.email}</div>
                 </Td>
                 <Td>
                   <ActionForm action={changeRole} hidden={{ org, user: m.user_id }} label="Change" inline>
@@ -60,7 +60,7 @@ export default async function MembersPage({ params }: PageProps<"/o/[org]/member
                 </Td>
                 <Td>
                   {m.user_id === me.id ? (
-                    <span className="text-xs text-slate-400">you</span>
+                    <span className="text-xs text-slate-500">you</span>
                   ) : (
                     <ActionForm
                       action={removeMember}

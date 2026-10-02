@@ -95,7 +95,7 @@ export function Table({ head, children, empty }: { head: string[]; children: Rea
         <tbody className="divide-y divide-slate-100">
           {rows === 0 ? (
             <tr>
-              <td colSpan={head.length} className="px-4 py-8 text-center text-slate-400">
+              <td colSpan={head.length} className="px-4 py-8 text-center text-slate-500">
                 {empty ?? "Nothing here yet."}
               </td>
             </tr>
@@ -132,7 +132,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
     <label className="block">
       <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
       {children}
-      {hint ? <span className="mt-1 block text-xs text-slate-400">{hint}</span> : null}
+      {hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
     </label>
   );
 }
