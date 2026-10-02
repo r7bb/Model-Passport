@@ -616,3 +616,11 @@ def test_ipv6_addresses_wrapping_a_private_ipv4_address_are_refused(
 def test_public_addresses_are_still_accepted(monkeypatch: pytest.MonkeyPatch, address: str) -> None:
     monkeypatch.setattr(service, "resolve_host", lambda host, port: [address])
     assert service.public_addresses("provider.test", 443) == [address]
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "99999", "http"])
+@pytest.mark.parametrize("allow_private", [False, True])
+def test_a_provider_port_outside_1_to_65535_is_refused(port: str, allow_private: bool) -> None:
+    # A GuardError becomes a 400 at the settings route instead of an unhandled ValueError (500).
+    with pytest.raises(GuardError, match="port"):
+        check_upstream(f"https://provider.test:{port}/v1", allow_private=allow_private)

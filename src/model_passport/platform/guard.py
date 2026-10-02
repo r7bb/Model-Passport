@@ -157,6 +157,12 @@ def check_upstream(url: str, allow_private: bool = False) -> str:
     parts = urlsplit(url.strip())
     if parts.scheme not in ("https", "http") or not parts.hostname:
         raise GuardError("the provider address must be a full URL, like https://api.openai.com/v1")
+    try:
+        port = parts.port  # raises ValueError when out of range or not a number
+    except ValueError:
+        port = 0
+    if port is not None and not 1 <= port <= MAX_PORT:
+        raise GuardError(f"the provider address has an invalid port (use 1 to {MAX_PORT})")
     if allow_private:
         return url.strip().rstrip("/")
     if parts.scheme != "https":
@@ -179,6 +185,7 @@ def public_addresses(host: str, port: int) -> list[str]:
     return addresses
 
 
+MAX_PORT = 65535
 NAT64_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")  # RFC 6052 well-known prefix
 IPV4_COMPATIBLE = ipaddress.IPv6Network("::/96")  # RFC 4291, deprecated
 
