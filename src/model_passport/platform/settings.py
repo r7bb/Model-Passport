@@ -17,6 +17,19 @@ def _env(name: str, default: str | None = None) -> str | None:
     return value if value not in (None, "") else default
 
 
+def _int(name: str, default: int, minimum: int) -> int:
+    raw = _env(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SettingsError(f"{name} must be a whole number") from exc
+    if value < minimum:
+        raise SettingsError(f"{name} must be at least {minimum}")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """``MP_DATABASE_URL``: SQLAlchemy URL (PostgreSQL in production; SQLite for local use).
@@ -37,6 +50,12 @@ class Settings:
     ``MP_GUARD_ALLOW_PRIVATE_UPSTREAMS``: let the guard forward to private or local addresses
     (a self-hosted Ollama or vLLM). Off by default, so an organization cannot point the
     platform's server at internal services.
+
+    Limits on the Guard endpoint (``/guard/v1``): ``MP_GUARD_MAX_BODY_BYTES`` (largest request
+    body, default 1 MiB), ``MP_GUARD_MAX_TOKENS`` (largest ``max_tokens``; also applied when a
+    request names none), ``MP_GUARD_MAX_N`` (largest ``n``, completions per request), and
+    ``MP_GUARD_RATE_PER_KEY`` / ``MP_GUARD_RATE_PER_IP`` (requests per minute for one client key
+    or one address; 0 turns that limit off).
     """
 
     database_url: str
@@ -49,6 +68,11 @@ class Settings:
     work_dir: Path = field(default_factory=lambda: Path("./mp-work"))
     controlplane: str | None = None  # host:port of the Go control plane, if deployed
     guard_private_upstreams: bool = False
+    guard_max_body_bytes: int = 1024 * 1024
+    guard_max_tokens: int = 4096
+    guard_max_n: int = 1
+    guard_rate_per_key: int = 60
+    guard_rate_per_ip: int = 120
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -70,6 +94,11 @@ class Settings:
             work_dir=Path(str(_env("MP_WORK_DIR", "./mp-work"))),
             controlplane=_env("MP_CONTROLPLANE_ADDR"),
             guard_private_upstreams=_env("MP_GUARD_ALLOW_PRIVATE_UPSTREAMS", "") in ("1", "true"),
+            guard_max_body_bytes=_int("MP_GUARD_MAX_BODY_BYTES", 1024 * 1024, 1),
+            guard_max_tokens=_int("MP_GUARD_MAX_TOKENS", 4096, 1),
+            guard_max_n=_int("MP_GUARD_MAX_N", 1, 1),
+            guard_rate_per_key=_int("MP_GUARD_RATE_PER_KEY", 60, 0),
+            guard_rate_per_ip=_int("MP_GUARD_RATE_PER_IP", 120, 0),
         )
 
 

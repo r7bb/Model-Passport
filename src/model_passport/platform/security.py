@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -138,3 +138,47 @@ class LoginThrottle:
     def succeeded(self, email: str) -> None:
         with self._lock:
             self._failures.pop(f"account:{email}", None)
+
+
+class RateLimiter:
+    """Allow ``limit`` requests per ``window`` seconds for each key (fixed window).
+
+    ``check`` counts a request and returns 0 if it may go ahead, or the seconds to wait. Memory
+    is bounded: expired windows are dropped when the table fills, and if it is still full the
+    key idle the longest is forgotten, so at most ``max_keys`` keys are tracked. A ``limit`` of
+    0 turns it off. State is in memory and per process; behind several replicas each one
+    counts separately, so pair it with a limit at the gateway or load balancer.
+    """
+
+    def __init__(self, limit: int, window: float = 60.0, max_keys: int = 10_000) -> None:
+        self.limit, self.window, self.max_keys = limit, window, max_keys
+        self._windows: OrderedDict[str, tuple[float, int]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def __len__(self) -> int:
+        return len(self._windows)
+
+    def check(self, key: str, now: float | None = None) -> int:
+        if self.limit <= 0:
+            return 0
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            started, count = self._windows.get(key, (now, 0))
+            if now - started >= self.window:
+                started, count = now, 0
+            if key not in self._windows:
+                self._make_room(now)
+            self._windows[key] = (started, count + 1)
+            self._windows.move_to_end(key)
+            if count + 1 <= self.limit:
+                return 0
+            return int(started + self.window - now) + 1
+
+    def _make_room(self, now: float) -> None:
+        if len(self._windows) < self.max_keys:
+            return
+        expired = [k for k, (start, _) in self._windows.items() if now - start >= self.window]
+        for key in expired:
+            del self._windows[key]
+        while len(self._windows) >= self.max_keys:
+            self._windows.popitem(last=False)

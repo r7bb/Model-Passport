@@ -6,6 +6,7 @@ All values are made up.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import os
 import tempfile
@@ -317,3 +318,167 @@ def test_provider_addresses_on_private_networks_are_refused() -> None:
         check_upstream("http://localhost:11434/v1/", allow_private=True)
         == "http://localhost:11434/v1"
     )
+
+
+# --- Limits on the proxy: body size, max_tokens, n, and request rates -------------------------
+
+
+def _limited(g: Guarded, **limits: int) -> str:
+    """Configure the org, apply small limits to the running app, and return a client key."""
+    eng = g.login("eng@acme.test")
+    _configure(g, eng)
+    state = g.client.app.state.mp  # type: ignore[attr-defined]
+    state.settings = dataclasses.replace(state.settings, **limits)
+    return str(g.call("POST", "/guard/keys", eng, 201, json={"name": "limited"})["key"])
+
+
+def _new_key(g: Guarded, name: str) -> str:
+    return str(
+        g.call("POST", "/guard/keys", g.login("eng@acme.test"), 201, json={"name": name})["key"]
+    )
+
+
+def _post(g: Guarded, path: str, key: str, **kw: Any) -> httpx.Response:
+    return g.client.post(f"/guard/v1{path}", headers={"Authorization": f"Bearer {key}"}, **kw)
+
+
+def test_body_over_the_cap_is_refused_before_forwarding(guarded: Guarded) -> None:
+    g = guarded
+    key = _limited(g, guard_max_body_bytes=2000)
+    big = {"messages": [{"role": "user", "content": "x" * 5000}]}
+    sent = len(g.provider.received)
+
+    declared = _post(g, "/chat/completions", key, json=big)
+    assert declared.status_code == 413
+    assert declared.json()["error"]["code"] == "request_too_large"
+
+    def chunks() -> Iterator[bytes]:  # no Content-Length: the limit applies to the bytes read
+        yield b'{"messages": [{"role": "user", "content": "'
+        yield b"x" * 5000
+        yield b'"}]}'
+
+    streamed = _post(g, "/chat/completions", key, content=chunks())
+    assert streamed.status_code == 413
+    assert _post(g, "/scan", key, json={"text": "x" * 5000}).status_code == 413
+    assert len(g.provider.received) == sent  # never forwarded
+    assert g.chat(key, "hi").status_code == 200  # a small body still works
+
+
+def test_malformed_body_gets_an_openai_style_error(guarded: Guarded) -> None:
+    g = guarded
+    key = _limited(g)
+    for content in (b"not json", b"[1, 2]"):
+        response = _post(g, "/chat/completions", key, content=content)
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_max_tokens_over_the_cap_is_rejected_and_absent_is_capped(guarded: Guarded) -> None:
+    g = guarded
+    key = _limited(g, guard_max_tokens=100)
+    sent = len(g.provider.received)
+    for field_name in ("max_tokens", "max_completion_tokens"):
+        refused = g.chat(key, "hi", expect=422, **{field_name: 101})
+        assert refused.json()["error"]["code"] == "invalid_request"
+    for bad in (0, -5, True, "50"):
+        g.chat(key, "hi", expect=422, max_tokens=bad)
+    assert len(g.provider.received) == sent
+
+    g.chat(key, "hi", temperature=0.2)
+    assert g.provider.received[-1]["max_tokens"] == 100  # no provider default left unbounded
+    assert g.provider.received[-1]["temperature"] == 0.2  # the rest is untouched
+    g.chat(key, "hi", max_tokens=100)
+    assert g.provider.received[-1]["max_tokens"] == 100
+    g.chat(key, "hi", max_completion_tokens=40)
+    assert g.provider.received[-1]["max_completion_tokens"] == 40
+    assert "max_tokens" not in g.provider.received[-1]
+
+
+def test_n_above_the_cap_is_rejected(guarded: Guarded) -> None:
+    g = guarded
+    key = _limited(g, guard_max_n=2)
+    sent = len(g.provider.received)
+    assert g.chat(key, "hi", expect=422, n=3).json()["error"]["code"] == "invalid_request"
+    g.chat(key, "hi", expect=422, n="2")
+    assert len(g.provider.received) == sent
+    g.chat(key, "hi", n=2)
+    assert g.provider.received[-1]["n"] == 2
+
+
+def test_per_key_rate_limit_returns_429_with_retry_after(guarded: Guarded) -> None:
+    g = guarded
+    first = _limited(g, guard_rate_per_key=2, guard_rate_per_ip=100)
+    second = _new_key(g, "other")
+    g.chat(first, "hi")
+    g.chat(first, "hi")
+    limited = g.chat(first, "hi", expect=429)
+    assert int(limited.headers["retry-after"]) >= 1
+    assert limited.json()["error"]["code"] == "rate_limited"
+    assert _post(g, "/scan", first, json={"text": "hi"}).status_code == 429  # shared by routes
+    g.chat(second, "hi")  # another key is unaffected
+
+
+def test_per_ip_rate_limit_applies_across_keys(guarded: Guarded) -> None:
+    g = guarded
+    first = _limited(g, guard_rate_per_key=100, guard_rate_per_ip=2)
+    second = _new_key(g, "other")
+    g.chat(first, "hi")
+    g.chat(second, "hi")
+    limited = g.chat(second, "hi", expect=429)
+    assert int(limited.headers["retry-after"]) >= 1
+    spoofed = {"Authorization": f"Bearer {first}", "X-Forwarded-For": "203.0.113.9"}
+    response = g.client.post("/guard/v1/scan", headers=spoofed, json={"text": "hi"})
+    assert response.status_code == 429  # X-Forwarded-For is not trusted
+
+
+def test_rate_limiter_windows_and_bounded_memory() -> None:
+    from model_passport.platform.security import RateLimiter
+
+    limiter = RateLimiter(limit=2, window=60, max_keys=3)
+    assert [limiter.check("a", now=0.0) for _ in range(2)] == [0, 0]
+    assert limiter.check("a", now=10.0) == 51
+    assert limiter.check("a", now=60.0) == 0  # a new window
+    for index in range(50):
+        limiter.check(f"key-{index}", now=61.0)
+    assert len(limiter) <= 3
+    assert RateLimiter(limit=0).check("a") == 0  # a limit of 0 turns it off
+
+
+def test_deeply_nested_body_inside_the_cap_is_a_400(guarded: Guarded) -> None:
+    g = guarded
+    key = _limited(g)
+    response = _post(g, "/chat/completions", key, content=b"[" * 100_000)
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("MP_GUARD_RATE_PER_KEY", "-1"),
+        ("MP_GUARD_RATE_PER_IP", "-1"),
+        ("MP_GUARD_MAX_BODY_BYTES", "0"),
+        ("MP_GUARD_MAX_TOKENS", "0"),
+        ("MP_GUARD_MAX_N", "0"),
+        ("MP_GUARD_MAX_N", "-3"),
+    ],
+)
+def test_unsafe_guard_limits_are_refused(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    from model_passport.platform.settings import SettingsError
+
+    monkeypatch.setenv("MP_JWT_SECRET", "j" * 40)
+    monkeypatch.setenv("MP_MASTER_KEY", base64.b64encode(os.urandom(32)).decode())
+    monkeypatch.setenv(name, value)
+    with pytest.raises(SettingsError, match=name):
+        Settings.from_env()
+
+
+def test_zero_rate_limits_stay_valid_as_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MP_JWT_SECRET", "j" * 40)
+    monkeypatch.setenv("MP_MASTER_KEY", base64.b64encode(os.urandom(32)).decode())
+    monkeypatch.setenv("MP_GUARD_RATE_PER_KEY", "0")
+    monkeypatch.setenv("MP_GUARD_RATE_PER_IP", "0")
+    settings = Settings.from_env()
+    assert (settings.guard_rate_per_key, settings.guard_rate_per_ip) == (0, 0)

@@ -11,6 +11,8 @@ Errors use OpenAI's error format, so SDKs surface them as usual.
 
 from __future__ import annotations
 
+import json
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -18,7 +20,8 @@ from datetime import timedelta
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -47,6 +50,7 @@ from model_passport.platform.api.schemas import (
 from model_passport.platform.db import ALL_TENANTS, scoped_session
 from model_passport.platform.models import GuardEvent, GuardKey, GuardSettings, Tenant, now
 from model_passport.platform.rbac import Permission
+from model_passport.platform.security import RateLimiter
 
 P = Permission
 proxy = APIRouter(prefix="/guard/v1", tags=["MP Guard endpoint"])
@@ -112,6 +116,29 @@ def _messages(body: dict[str, Any]) -> list[dict[str, Any]]:
             "stream_unsupported",
         )
     return messages
+
+
+def _check_limits(body: dict[str, Any], max_tokens: int, max_n: int) -> dict[str, Any]:
+    """Refuse requests that could run up cost; return the extra fields to send upstream.
+
+    Over-limit values are rejected (422), not clamped: silently changing a client's request
+    would hide the problem, and a gateway should say what it will not do. A request that names
+    no token limit gets ``max_tokens`` so the provider's own default cannot run unbounded.
+    """
+    for name in ("max_tokens", "max_completion_tokens"):
+        value = body.get(name)
+        if value is not None and (not _is_count(value) or value > max_tokens):
+            message = f"{name} must be a whole number from 1 to {max_tokens}"
+            raise RunStoppedError(422, message, "invalid_request")
+    n = body.get("n")
+    if n is not None and (not _is_count(n) or n > max_n):
+        raise RunStoppedError(422, f"n must be a whole number from 1 to {max_n}", "invalid_request")
+    named = body.get("max_tokens") is not None or body.get("max_completion_tokens") is not None
+    return {} if named else {"max_tokens": max_tokens}
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def _forward(
@@ -188,8 +215,9 @@ def run_chat(
     try:
         messages = _messages(body)
         run.protected = _protect(engine, messages, vault, run.report)
+        extra = _check_limits(body, app.settings.guard_max_tokens, app.settings.guard_max_n)
         key = _provider_key(settings, tenant_key, model)
-        payload = {**body, "model": model, "messages": run.protected}
+        payload = {**body, **extra, "model": model, "messages": run.protected}
         upstream, completion = _forward(app, settings.upstream_url, key, payload)
         run.body = _review(engine, completion, vault, run.report, upstream)
         outcome = _outcome(run.report)
@@ -233,22 +261,102 @@ def _caller(app: AppState, authorization: str | None) -> tuple[str, Tenant]:
 
 Authorization = Annotated[str | None, Header()]
 
+# Request rates are counted in memory, per process (see RateLimiter). The limiters are made on
+# first use from the app's settings and kept on ``app.state``.
+_limiter_lock = threading.Lock()
 
-@proxy.post("/chat/completions", response_model=None)
-def chat_completions(
-    body: Annotated[dict[str, Any], Body()], app: State, authorization: Authorization = None
-) -> JSONResponse:
-    """OpenAI-compatible chat completions, with personal data kept from the model."""
+
+@dataclass
+class Admitted:
+    key_id: str
+    tenant: Tenant
+    body: dict[str, Any]
+
+
+def _limiters(request: Request, app: AppState) -> tuple[RateLimiter, RateLimiter]:
+    with _limiter_lock:
+        made = getattr(request.app.state, "guard_limiters", None)
+        if made is None:
+            settings = app.settings
+            made = (
+                RateLimiter(settings.guard_rate_per_key),
+                RateLimiter(settings.guard_rate_per_ip),
+            )
+            request.app.state.guard_limiters = made
+    return made
+
+
+def _too_many(wait: int) -> JSONResponse:
+    response = _error(429, "too many requests; slow down", "rate_limited")
+    response.headers["Retry-After"] = str(wait)
+    return response
+
+
+async def _read_json(request: Request, limit: int) -> dict[str, Any] | JSONResponse:
+    """Read the body, never holding more than ``limit`` bytes, and parse it as a JSON object."""
+    too_large = _error(413, f"request body is over {limit} bytes", "request_too_large")
+    declared = request.headers.get("content-length", "")
+    if declared.isascii() and declared.isdigit() and int(declared) > limit:
+        return too_large
+    received = bytearray()
+    async for chunk in request.stream():  # Content-Length may be absent or wrong
+        received += chunk
+        if len(received) > limit:
+            return too_large
     try:
-        key_id, tenant = _caller(app, authorization)
+        body = json.loads(received)
+    except (ValueError, RecursionError):  # malformed, or nested too deeply to parse
+        body = None
+    if not isinstance(body, dict):
+        return _error(400, "send a JSON object", "invalid_request")
+    return body
+
+
+async def _admit(
+    request: Request, app: AppState, authorization: str | None
+) -> Admitted | JSONResponse:
+    """Rate-limit by address, authenticate, rate-limit by key, then read the body.
+
+    Only ``request.client.host`` identifies the address: the app has no trusted-proxy setting,
+    so ``X-Forwarded-For`` is ignored (anyone could set it to dodge the limit).
+    """
+    per_key, per_ip = _limiters(request, app)
+    wait = per_ip.check(request.client.host if request.client else "unknown")
+    if wait:
+        return _too_many(wait)
+    try:
+        key_id, tenant = await run_in_threadpool(_caller, app, authorization)
     except HTTPException as exc:
         return _error(401, str(exc.detail), "invalid_api_key")
-    with scoped_session(app.factory, tenant.id) as session:
-        run = run_chat(app, session, tenant, body, source="api", key_id=key_id)
+    wait = per_key.check(key_id)
+    if wait:
+        return _too_many(wait)
+    body = await _read_json(request, app.settings.guard_max_body_bytes)
+    if isinstance(body, JSONResponse):
+        return body
+    return Admitted(key_id, tenant, body)
+
+
+def _chat(app: AppState, admitted: Admitted) -> JSONResponse:
+    with scoped_session(app.factory, admitted.tenant.id) as session:
+        run = run_chat(
+            app, session, admitted.tenant, admitted.body, source="api", key_id=admitted.key_id
+        )
     headers = {
         "X-MP-Guard": ", ".join(f"{kind}={sum(c.values())}" for kind, c in _totals(run.report))
     }
     return JSONResponse(run.body, status_code=run.status, headers=headers)
+
+
+@proxy.post("/chat/completions", response_model=None)
+async def chat_completions(
+    request: Request, app: State, authorization: Authorization = None
+) -> JSONResponse:
+    """OpenAI-compatible chat completions, with personal data kept from the model."""
+    admitted = await _admit(request, app, authorization)
+    if isinstance(admitted, JSONResponse):
+        return admitted
+    return await run_in_threadpool(_chat, app, admitted)
 
 
 def _totals(report: Report) -> list[tuple[str, Counter[str]]]:
@@ -260,18 +368,20 @@ def _totals(report: Report) -> list[tuple[str, Counter[str]]]:
 
 
 @proxy.post("/scan", response_model=None)
-def scan(
-    body: Annotated[dict[str, Any], Body()], app: State, authorization: Authorization = None
-) -> JSONResponse:
+async def scan(request: Request, app: State, authorization: Authorization = None) -> JSONResponse:
     """Check text without calling a model, e.g. a tool's result before an agent uses it.
 
     ``direction`` is ``request`` (text going to a model: values are replaced) or ``reply``
     (text coming from one: leaks are handled). The reply is the text to use instead.
     """
-    try:
-        key_id, tenant = _caller(app, authorization)
-    except HTTPException as exc:
-        return _error(401, str(exc.detail), "invalid_api_key")
+    admitted = await _admit(request, app, authorization)
+    if isinstance(admitted, JSONResponse):
+        return admitted
+    return await run_in_threadpool(_scan, app, admitted)
+
+
+def _scan(app: AppState, admitted: Admitted) -> JSONResponse:
+    body, tenant, key_id = admitted.body, admitted.tenant, admitted.key_id
     text, direction = body.get("text"), body.get("direction", "request")
     if not isinstance(text, str) or direction not in ("request", "reply"):
         return _error(400, "send text, and direction 'request' or 'reply'", "invalid_request")
