@@ -127,3 +127,58 @@ export type TestReport = {
   summary: string;
   created_at: string;
 };
+
+export type GuardAction = "mask" | "redact" | "block" | "allow";
+
+export type GuardSettings = {
+  upstream_url: string;
+  has_upstream_key: boolean;
+  default_model: string;
+  policy: {
+    inbound: Record<string, GuardAction>;
+    inbound_default: GuardAction;
+    outbound: Record<string, GuardAction>;
+    memorized: GuardAction;
+  };
+  entity_types: string[];
+  effective: Record<string, { request: GuardAction; reply: GuardAction }>;
+  endpoint: string;
+};
+
+export type GuardKey = {
+  id: string;
+  name: string;
+  hint: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
+export type GuardReport = {
+  masked?: Record<string, number>;
+  redacted?: Record<string, number>;
+  leaked?: Record<string, number>;
+  memorized?: Record<string, number>;
+};
+
+export type GuardEvent = {
+  id: string;
+  source: "api" | "scan" | "playground";
+  model: string;
+  outcome: "passed" | "protected" | "blocked" | "error";
+  upstream_status: number | null;
+  latency_ms: number;
+  report: GuardReport;
+  detail: string;
+  created_at: string;
+};
+
+export type GuardStats = {
+  days: number;
+  requests: number;
+  outcomes: Partial<Record<GuardEvent["outcome"], number>>;
+  values: { masked: number; redacted: number; leaked: number; memorized: number };
+  by_type: Record<"masked" | "redacted" | "leaked" | "memorized", Record<string, number>>;
+  per_day: ({ day: string; requests: number } & Partial<Record<GuardEvent["outcome"], number>>)[];
+  median_latency_ms: number | null;
+};

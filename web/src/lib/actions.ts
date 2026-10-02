@@ -2,8 +2,8 @@ import "server-only";
 
 import { ApiError } from "./api";
 
-/** What a form shows after its server action ran. */
-export type ActionState = { ok: boolean; message: string } | null;
+/** What a form shows after its server action ran; ``secret`` is shown once, to copy. */
+export type ActionState = { ok: boolean; message: string; secret?: string } | null;
 
 export function field(form: FormData, name: string): string {
   const value = form.get(name);
@@ -27,9 +27,12 @@ export function idOf(form: FormData, name: string): string {
 }
 
 /** Run a mutation and turn backend refusals into a message for the form. */
-export async function attempt(run: () => Promise<string>): Promise<ActionState> {
+export async function attempt(
+  run: () => Promise<string | { message: string; secret: string }>,
+): Promise<ActionState> {
   try {
-    return { ok: true, message: await run() };
+    const result = await run();
+    return typeof result === "string" ? { ok: true, message: result } : { ok: true, ...result };
   } catch (error) {
     if (error instanceof ApiError) {
       const prefix = error.status === 403 ? "Not allowed: " : error.status === 401 ? "Signed out: " : "";

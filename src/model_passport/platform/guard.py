@@ -186,7 +186,12 @@ def update_settings(
     except (TypeError, ValueError) as exc:
         raise GuardError(f"invalid policy: {exc}") from exc
     row = settings_for(session, tenant.id)
-    row.upstream_url = check_upstream(change.upstream_url, allow_private)
+    upstream_url = check_upstream(change.upstream_url, allow_private)
+    moved = urlsplit(upstream_url).netloc != urlsplit(row.upstream_url).netloc
+    if moved and row.upstream_key is not None and not (change.upstream_key or "").strip():
+        # The saved key must never follow the address to a host its owner did not enter it for.
+        raise GuardError("enter the provider API key again when changing the provider address")
+    row.upstream_url = upstream_url
     row.default_model = change.default_model.strip()[:200]
     row.policy = parsed.to_json()
     if change.upstream_key is not None:

@@ -314,12 +314,17 @@ def scan(
 @router.get("/settings", response_model=GuardSettingsOut)
 def get_settings(c: Annotated[Ctx, ctx(P.GUARD_READ)]) -> GuardSettingsOut:
     row = service.settings_for(c.session, c.tenant.id)
+    policy = Policy.from_json(row.policy)
     return GuardSettingsOut(
         upstream_url=row.upstream_url,
         has_upstream_key=row.upstream_key is not None,
         default_model=row.default_model,
-        policy=Policy.from_json(row.policy).to_json(),
+        policy=policy.to_json(),
         entity_types=list(PatternDetector.types),
+        effective={
+            kind: {"request": policy.for_request(kind).value, "reply": policy.for_reply(kind).value}
+            for kind in PatternDetector.types
+        },
         endpoint="/guard/v1",
     )
 

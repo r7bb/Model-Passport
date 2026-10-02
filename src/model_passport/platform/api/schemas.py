@@ -221,6 +221,9 @@ class GuardSettingsOut(BaseModel):
     default_model: str
     policy: dict[str, Any]
     entity_types: list[str]
+    effective: dict[str, dict[str, str]] = Field(
+        description="The action that applies to each type: {type: {request, reply}}."
+    )
     endpoint: str
 
 

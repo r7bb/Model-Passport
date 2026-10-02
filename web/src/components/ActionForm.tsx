@@ -1,9 +1,9 @@
 "use client";
 
-import { type ReactNode, useActionState } from "react";
+import { type ReactNode, useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 
-type ActionState = { ok: boolean; message: string } | null;
+type ActionState = { ok: boolean; message: string; secret?: string } | null;
 type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
 
 function Submit({ label, danger }: { label: string; danger?: boolean }) {
@@ -19,6 +19,33 @@ function Submit({ label, danger }: { label: string; danger?: boolean }) {
     >
       {pending ? "Working…" : label}
     </button>
+  );
+}
+
+/** A secret shown once (a new API key), with a copy button. */
+function Secret({ value }: { value: string }) {
+  const [status, setStatus] = useState("Copy");
+  return (
+    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p className="text-xs font-medium text-amber-800">Copy it now: it will not be shown again.</p>
+      <div className="mt-2 flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded bg-white px-2 py-1 font-mono text-xs text-slate-800 ring-1 ring-amber-200">
+          {value}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(value).then(
+              () => setStatus("Copied"),
+              () => setStatus("Select it and copy"),
+            );
+          }}
+          className="rounded-md bg-white px-2 py-1 text-xs font-medium text-amber-800 ring-1 ring-amber-300 hover:bg-amber-100"
+        >
+          {status}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -61,6 +88,7 @@ export function ActionForm({
           </span>
         ) : null}
       </div>
+      {state?.secret ? <Secret key={state.secret} value={state.secret} /> : null}
     </form>
   );
 }

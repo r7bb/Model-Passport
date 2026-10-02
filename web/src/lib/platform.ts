@@ -52,7 +52,9 @@ type Permission =
   | "analytics.read"
   | "provenance.read"
   | "reports.read"
-  | "jobs.read";
+  | "jobs.read"
+  | "guard.manage"
+  | "guard.read";
 
 const READ: Permission[] = [
   "models.read",
@@ -71,14 +73,25 @@ const PERMISSIONS: Record<Role, Permission[]> = {
     "killswitch.activate",
     "auditlog.read",
     "reports.read",
+    "guard.manage",
+    "guard.read",
   ],
-  ml_engineer: [...READ, "models.write", "audits.run", "remediation.run", "endpoints.dev"],
+  ml_engineer: [
+    ...READ,
+    "models.write",
+    "audits.run",
+    "remediation.run",
+    "endpoints.dev",
+    "guard.manage",
+    "guard.read",
+  ],
   compliance_auditor: [
     ...READ,
     "approvals.decide",
     "killswitch.activate",
     "auditlog.read",
     "reports.read",
+    "guard.read",
   ],
   canary_tester: ["models.read", "endpoints.dev", "testreports.submit"],
   end_consumer: [],
@@ -89,9 +102,13 @@ export function can(role: Role | null, permission: Permission, superAdmin = fals
   return superAdmin || (role !== null && PERMISSIONS[role].includes(permission));
 }
 
-/** The dashboard modules from the product flow, and who sees each. */
+/** The dashboard modules, and who sees each. MP Guard comes first: it is the product. */
 export const MODULES: { id: string; label: string; path: string; needs: Permission }[] = [
-  { id: "M1", label: "Dashboard", path: "", needs: "models.read" },
+  { id: "G", label: "Guard", path: "/guard", needs: "guard.read" },
+  { id: "G", label: "Guard settings", path: "/guard/settings", needs: "guard.read" },
+  { id: "G", label: "API keys", path: "/guard/keys", needs: "guard.read" },
+  { id: "G", label: "Playground", path: "/guard/playground", needs: "guard.manage" },
+  { id: "M1", label: "Model audits", path: "", needs: "models.read" },
   { id: "M2", label: "Access & roles", path: "/members", needs: "members.manage" },
   { id: "M3", label: "Analytics", path: "/analytics", needs: "analytics.read" },
   { id: "M4", label: "Audit log", path: "/audit-log", needs: "auditlog.read" },

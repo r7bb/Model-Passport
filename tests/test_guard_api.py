@@ -197,7 +197,9 @@ def test_roles_and_isolation(guarded: Guarded) -> None:
     )
     _configure(g, eng)
     g.call("POST", "/guard/keys", eng, 201, json={"name": "app"})
-    g.call("GET", "/guard/settings", auditor)  # auditors can see the setup
+    seen = g.call("GET", "/guard/settings", auditor)  # auditors can see the setup
+    assert seen["effective"]["SSN"] == {"request": "mask", "reply": "redact"}
+    assert seen["effective"]["DATE"] == {"request": "allow", "reply": "allow"}
     g.call("PUT", "/guard/settings", auditor, 403, json={"upstream_url": "https://x.test/v1"})
     g.call("GET", "/guard/keys", user, 403)
     other = g.login("admin@globex.test", "globex")
@@ -215,6 +217,22 @@ def test_the_provider_key_is_encrypted_at_rest(guarded: Guarded) -> None:
         tenant = session.get(Tenant, stored.tenant_id)
         assert tenant is not None
         assert service.provider_key(stored, service.data_key(g.master, tenant)) == PROVIDER_KEY
+
+
+def test_a_new_provider_host_needs_the_key_again(guarded: Guarded) -> None:
+    """Otherwise anyone who manages the guard could send the saved key to a host they own."""
+    g, eng = guarded, guarded.login("eng@acme.test")
+    _configure(g, eng)
+    keep = {"upstream_key": None, "default_model": "gpt-test", "policy": {}}
+    moved = {**keep, "upstream_url": "https://attacker.test/v1"}
+    error = g.call("PUT", "/guard/settings", eng, 400, json=moved)
+    assert "API key" in error["detail"]
+    same_host = {**keep, "upstream_url": "https://provider.test/v2"}
+    assert g.call("PUT", "/guard/settings", eng, json=same_host)["has_upstream_key"] is True
+    rekeyed = {**moved, "upstream_key": "sk-new"}
+    assert g.call("PUT", "/guard/settings", eng, json=rekeyed)["upstream_url"].startswith(
+        "https://attacker.test"
+    )
 
 
 def test_values_the_audit_found_memorized_are_redacted(guarded: Guarded) -> None:

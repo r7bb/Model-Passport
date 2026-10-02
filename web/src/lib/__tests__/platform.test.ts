@@ -32,6 +32,14 @@ describe("roles", () => {
     expect(ids("external_reviewer")).toEqual(["M9"]);
     expect(ids("end_consumer")).toEqual([]);
   });
+  it("puts MP Guard first, and keeps the playground to those who manage it", () => {
+    const labels = (role: Parameters<typeof visibleModules>[0]) => visibleModules(role).map((m) => m.label);
+    expect(labels("ml_engineer")[0]).toBe("Guard");
+    expect(labels("ml_engineer")).toContain("Playground");
+    expect(labels("compliance_auditor")).toContain("Guard");
+    expect(labels("compliance_auditor")).not.toContain("Playground");
+    expect(labels("canary_tester")).not.toContain("Guard");
+  });
 });
 
 describe("nextSteps", () => {
