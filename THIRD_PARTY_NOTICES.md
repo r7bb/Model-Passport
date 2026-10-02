@@ -7,6 +7,14 @@ Model Passport is released under the MIT License (see [LICENSE](LICENSE)). It bu
 - Kalokyri, V. et al. "AI Model Passport: Data and System Traceability Framework for Transparent AI in Health." arXiv:2506.22358 (2025), *Computational and Structural Biotechnology Journal*. Model Passport extends the AIPassport concept with automated privacy scanning, leakage auditing, and cryptographic identity. No code from AIPassport is included.
 - Yeom, S. et al. "Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting." IEEE CSF (2018). Basis of the loss-threshold membership inference audit.
 
+## Datasets
+
+| Dataset | License | Source | Attribution |
+|---|---|---|---|
+| Nemotron-PII (NVIDIA) | CC BY 4.0 | https://huggingface.co/datasets/nvidia/Nemotron-PII | "Nemotron-PII by NVIDIA, licensed under CC BY 4.0" |
+
+Used by `model_passport.llm.public_data` for the public accuracy benchmark. The dataset is downloaded on demand; this repository includes only aggregate benchmark results computed from it (`docs/benchmarks/nemotron-pythia-160m.json`).
+
 ## Runtime dependencies
 
 | Package | License |
