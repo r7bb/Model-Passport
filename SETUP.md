@@ -328,6 +328,20 @@ Sign in as `root@platform.example` for the platform console, or as any printed a
 
 After 5 wrong passwords for one account within 15 minutes, sign-in for that account is refused (HTTP 429, with a Retry-After header) until the oldest failure is 15 minutes old. A correct password clears the count. The limit is kept per backend process, so with several replicas add a rate limit at the load balancer as well.
 
+### Guard limits
+
+The Guard endpoints (`/guard/v1/chat/completions` and `/guard/v1/scan`) cap what one request can cost. Each limit is an environment setting on the backend:
+
+| Setting | Default | What happens over the limit |
+|---|---|---|
+| `MP_GUARD_MAX_BODY_BYTES` | `1048576` (1 MiB) | The request is refused with HTTP 413 before it is read further or sent on |
+| `MP_GUARD_MAX_TOKENS` | `4096` | `max_tokens` or `max_completion_tokens` above it is refused with 422; a request that names neither is sent with `max_tokens` at this cap |
+| `MP_GUARD_MAX_N` | `1` | `n` above it is refused with 422 |
+| `MP_GUARD_RATE_PER_KEY` | `60` per minute | HTTP 429 with a Retry-After header; `0` turns this limit off |
+| `MP_GUARD_RATE_PER_IP` | `120` per minute | HTTP 429 with a Retry-After header; `0` turns this limit off |
+
+The first three must be at least 1, and the rates cannot be negative; otherwise the backend stops at startup with an error naming the setting. Rate limits are kept per backend process and use the address of the direct connection (`X-Forwarded-For` is not trusted), so behind a load balancer or with several replicas, add a rate limit there as well.
+
 ### How organizations are kept apart
 
 - **In the database:** PostgreSQL row-level security. Every transaction is limited to one organization, so even a query that forgets its filter cannot read another organization's rows. A session with no organization set sees nothing.
@@ -544,6 +558,7 @@ This opens a browser page showing the local `passport.json` and its history. To 
 The registry is a small server that keeps passports from many models and re-checks each one on upload:
 
 ```bash
+export PASSPORT_REGISTRY_TOKEN=choose-a-long-random-token          # same value for server and client
 passport serve --db registry.db                                   # starts at http://localhost:8000
 passport push passport.json --registry http://localhost:8000      # upload
 passport dashboard --registry http://localhost:8000
@@ -555,7 +570,7 @@ Interactive API docs are at http://localhost:8000/docs. The main endpoints:
 - `GET /passports/{id}`, plus `/verify`, `/lineage`, `/dag`, `/html`, and `/jsonld`
 - `POST /passports/{id}/events`
 
-To require a password (bearer token) for uploads, set `PASSPORT_REGISTRY_TOKEN` on both the server and the client. To accept only passports signed by known keys, put their `.pub` files in a folder and pass `--trusted-keys <folder>`.
+Uploads and event appends need a password (bearer token): set `PASSPORT_REGISTRY_TOKEN` to the same value on the server and the client (`passport push` reads it, or takes `--token`). A registry started without a token refuses every write with HTTP 503 instead of accepting it; reading passports needs no token. To accept only passports signed by known keys, put their `.pub` files in a folder and pass `--trusted-keys <folder>`.
 
 ---
 
@@ -574,6 +589,8 @@ docker compose up -d --build
 | Registry API | http://localhost:8000/docs |
 | MLflow | http://localhost:5000 |
 | Object store (S3 API) | http://localhost:8333 |
+
+For local use, the compose registry starts with the token `dev-only-registry-token` unless you set `PASSPORT_REGISTRY_TOKEN` in `.env`. To upload to it, run `passport push` with `PASSPORT_REGISTRY_TOKEN=dev-only-registry-token` (or your own value from `.env`). Set your own long random token before the registry is reachable by anyone else.
 
 To log runs to MLflow, set `tracking.mlflow_uri: http://localhost:5000` in `passport.yaml`. Stop everything with `docker compose down`.
 
@@ -770,3 +787,4 @@ python scripts/terminal_shot.py --help
 | k-anonymity shows "not evaluated: no quasi-identifiers found" | List the columns that could identify a person under `privacy.quasi_identifiers` in `passport.yaml`, or ignore the warning if there are none |
 | Docker services don't start | Check `docker compose ps` and `docker compose logs <service>`. Make sure `.env` exists and ports 5000, 8000, 8501, 9000, and 9001 are free. |
 | The registry rejects uploads with 401 | Set the same `PASSPORT_REGISTRY_TOKEN` for the server and for `passport push` |
+| The registry rejects uploads with 503 | The server has no `PASSPORT_REGISTRY_TOKEN`; set one on the server (and the same one for `passport push`) |
