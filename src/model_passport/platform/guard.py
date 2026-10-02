@@ -174,9 +174,31 @@ def public_addresses(host: str, port: int) -> list[str]:
     if not addresses:
         raise GuardError(f"cannot resolve {host}")
     for text in addresses:
-        if not ipaddress.ip_address(text).is_global:
+        if not _is_public(ipaddress.ip_address(text)):
             raise GuardError("the provider address points to a private or local network")
     return addresses
+
+
+NAT64_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")  # RFC 6052 well-known prefix
+IPV4_COMPATIBLE = ipaddress.IPv6Network("::/96")  # RFC 4291, deprecated
+
+
+def _embedded_ipv4(address: ipaddress.IPv6Address) -> list[ipaddress.IPv4Address]:
+    """IPv4 addresses an IPv6 address carries and may route to (mapped, NAT64, 6to4, Teredo)."""
+    low32 = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+    found = [address.ipv4_mapped, address.sixtofour, *(address.teredo or ())]
+    if address in NAT64_PREFIX or address in IPV4_COMPATIBLE:
+        found.append(low32)
+    return [ip for ip in found if ip is not None]
+
+
+def _is_public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Global, and if it wraps an IPv4 address, that address is global too."""
+    if not address.is_global:
+        return False
+    if isinstance(address, ipaddress.IPv6Address):
+        return all(ip.is_global for ip in _embedded_ipv4(address))
+    return True
 
 
 @dataclass(frozen=True)

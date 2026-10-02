@@ -574,3 +574,45 @@ def test_zero_rate_limits_stay_valid_as_off(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("MP_GUARD_RATE_PER_IP", "0")
     settings = Settings.from_env()
     assert (settings.guard_rate_per_key, settings.guard_rate_per_ip) == (0, 0)
+
+
+# --- IPv6 addresses that wrap an IPv4 address -------------------------------------------------
+
+# Teredo (2001:0::/32) carries the client's IPv4 address with every bit flipped in the last 32 bits.
+TEREDO_CLIENT_10_0_0_1 = "2001:0:4136:e378:8000:63bf:f5ff:fffe"
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "64:ff9b::a9fe:a9fe",  # NAT64 well-known prefix -> 169.254.169.254 (cloud metadata)
+        "64:ff9b::7f00:1",  # NAT64 -> 127.0.0.1
+        "64:ff9b::a00:1",  # NAT64 -> 10.0.0.1
+        "::127.0.0.1",  # IPv4-compatible (deprecated) -> 127.0.0.1
+        "::10.0.0.1",  # IPv4-compatible -> 10.0.0.1
+        "::ffff:127.0.0.1",  # IPv4-mapped -> 127.0.0.1
+        "::ffff:192.168.1.1",  # IPv4-mapped -> 192.168.1.1
+        "2002:7f00:1::1",  # 6to4 -> 127.0.0.1
+        "2002:a00:1::1",  # 6to4 -> 10.0.0.1
+        TEREDO_CLIENT_10_0_0_1,  # Teredo -> client 10.0.0.1
+    ],
+)
+def test_ipv6_addresses_wrapping_a_private_ipv4_address_are_refused(
+    monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    monkeypatch.setattr(service, "resolve_host", lambda host, port: [address])
+    with pytest.raises(GuardError, match="private or local"):
+        service.public_addresses("provider.test", 443)
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "2606:4700::1111",  # plain public IPv6
+        "64:ff9b::808:808",  # NAT64 -> 8.8.8.8, a public IPv4 address
+        "93.184.216.34",
+    ],
+)
+def test_public_addresses_are_still_accepted(monkeypatch: pytest.MonkeyPatch, address: str) -> None:
+    monkeypatch.setattr(service, "resolve_host", lambda host, port: [address])
+    assert service.public_addresses("provider.test", 443) == [address]
