@@ -113,6 +113,7 @@ _DETECTORS: list[tuple[str, re.Pattern[str], object]] = [
     ("IPV6", IPV6_RE, _valid_ip),
     ("DATE", DATE_RE, None),
 ]
+DETECTED_TYPES = tuple(kind for kind, _, _ in _DETECTORS)
 
 
 def detect(text: str) -> list[Span]:

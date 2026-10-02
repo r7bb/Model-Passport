@@ -336,3 +336,23 @@ def test_login_throttle_per_client_limit_when_enabled() -> None:
     throttle.failed("b@x.test", "9.9.9.9", now=0)
     assert throttle.retry_after("c@x.test", "9.9.9.9", now=1) > 0
     assert throttle.retry_after("c@x.test", "8.8.8.8", now=1) == 0
+
+
+def test_migrations_match_the_models(tmp_path: Path) -> None:
+    """Every table, column, and index the models declare exists after migrating, and no more."""
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from model_passport.platform.models import Base
+
+    engine = make_engine(f"sqlite:///{tmp_path}/drift.db")
+    migrate(engine)
+    with engine.connect() as connection:
+        context = MigrationContext.configure(connection, opts={"compare_type": False})
+        drift = [
+            change
+            for change in compare_metadata(context, Base.metadata)
+            if not (isinstance(change, tuple) and change[0] == "remove_table"
+                    and change[1].name == "alembic_version")
+        ]  # fmt: skip
+    assert drift == []

@@ -201,3 +201,59 @@ class TestReportOut(_Out):
     leaks_found: int
     summary: str
     created_at: datetime
+
+
+# --- MP Guard ---------------------------------------------------------------------------------
+
+
+class GuardSettingsIn(BaseModel):
+    upstream_url: str = Field(description="The AI provider's OpenAI-compatible address.")
+    upstream_key: str | None = Field(
+        default=None, description="The provider's API key; omit to keep it, empty to remove it."
+    )
+    default_model: str = ""
+    policy: dict[str, Any] = Field(default_factory=dict)
+
+
+class GuardSettingsOut(BaseModel):
+    upstream_url: str
+    has_upstream_key: bool
+    default_model: str
+    policy: dict[str, Any]
+    entity_types: list[str]
+    endpoint: str
+
+
+class GuardKeyIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class GuardKeyOut(_Out):
+    id: str
+    name: str
+    hint: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class GuardKeyCreated(GuardKeyOut):
+    key: str = Field(description="Shown once. Store it in the app's secrets.")
+
+
+class GuardEventOut(_Out):
+    id: str
+    source: str
+    model: str
+    outcome: str
+    upstream_status: int | None
+    latency_ms: int
+    report: dict[str, Any]
+    detail: str
+    created_at: datetime
+
+
+class GuardPlaygroundIn(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
+    send: bool = Field(default=False, description="Also send it to the AI provider.")
+    model: str = ""

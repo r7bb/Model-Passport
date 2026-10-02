@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from model_passport.platform import auditlog, lifecycle, services
 from model_passport.platform.api.schemas import MemberIn
 from model_passport.platform.controlplane import ControlPlane
 from model_passport.platform.db import ALL_TENANTS, scoped_session
+from model_passport.platform.guard import MemorizedCache
 from model_passport.platform.models import Membership, Role, Tenant, TenantStatus, User
 from model_passport.platform.rbac import Permission, allowed
 from model_passport.platform.security import LoginThrottle, TokenError, read_token
@@ -36,6 +38,9 @@ class AppState:
     factory: sessionmaker[Session]
     store: ObjectStore
     logins: LoginThrottle = field(default_factory=LoginThrottle)
+    # MP Guard: one pooled client for AI providers, and each organization's memorized values
+    guard_http: httpx.Client = field(default_factory=lambda: httpx.Client(timeout=120.0))
+    memorized: MemorizedCache = field(default_factory=MemorizedCache)
 
 
 def state(request: Request) -> AppState:

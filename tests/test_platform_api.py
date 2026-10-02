@@ -154,6 +154,7 @@ def _detect(p: Platform, who: dict[str, dict[str, str]]) -> tuple[dict[str, Any]
     assert v1["verdict"] == "fail"
     findings = p.call("GET", f"/versions/{v1['id']}/findings", auditor)["audit"]["findings"]
     assert findings[0]["severity"] == "critical"
+    assert all(f["fingerprint"] for f in findings)  # so the guard can block memorized values
     return model, v1
 
 

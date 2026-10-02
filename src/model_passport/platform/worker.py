@@ -21,7 +21,7 @@ import tarfile
 import tempfile
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,7 @@ from model_passport.llm.remediate import bump_minor, translate
 from model_passport.llm.sanitize import risky_spans, sanitize
 from model_passport.llm.stages import audit_corpus, finetune_corpus
 from model_passport.llm.training import TrainSettings
-from model_passport.platform import attest, gate, jobs, lifecycle, reports, services
+from model_passport.platform import attest, gate, guard, jobs, lifecycle, reports, services
 from model_passport.platform.auditlog import SYSTEM
 from model_passport.platform.db import ALL_TENANTS, scoped_session
 from model_passport.platform.models import (
@@ -158,8 +158,13 @@ def _audit(ctx: WorkerContext, job: Job, work: Path) -> dict[str, Any]:
         corpus.write_bytes(files.get(reference.object_key))
         spec = _model_spec(files, version, work)
         trained_here = version.artifact_key is not None  # so the holdout was never trained on
+        # Keyed fingerprints let the guard recognize memorized values without storing them.
+        keyed = replace(
+            ctx.audit,
+            fingerprint_key=guard.fingerprint_key(guard.data_key(ctx.master_key, tenant)),
+        )
     holdout = ctx.holdout if trained_here else 0.0
-    result = audit_corpus(spec, corpus, work / "audit.json", ctx.audit, holdout=holdout)
+    result = audit_corpus(spec, corpus, work / "audit.json", keyed, holdout=holdout)
     verdict = gate.check(result)
     with scoped_session(ctx.factory, job.tenant_id) as session:
         version = services.get(session, ModelVersion, job.tenant_id, job.payload["version"])

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from model_passport import __version__
-from model_passport.platform.api import routes_admin, routes_tenant
+from model_passport.platform.api import routes_admin, routes_guard, routes_tenant
 from model_passport.platform.api.deps import AppState
 from model_passport.platform.db import make_engine, migrate, session_factory
 from model_passport.platform.settings import Settings
@@ -31,6 +31,8 @@ def create_app(settings: Settings, run_migrations: bool = True) -> FastAPI:
     )
     app.include_router(routes_admin.router, prefix=API_PREFIX)
     app.include_router(routes_tenant.router, prefix=API_PREFIX)
+    app.include_router(routes_guard.router, prefix=API_PREFIX)
+    app.include_router(routes_guard.proxy)
 
     @app.get("/health", tags=["ops"])
     def health() -> dict[str, str]:

@@ -33,6 +33,10 @@ class Settings:
 
     ``MP_CONTROLPLANE_ADDR``: the Go control plane (``host:port``). When set, canary and release
     deploy through it, and rollback and the kill switch go through it.
+
+    ``MP_GUARD_ALLOW_PRIVATE_UPSTREAMS``: let the guard forward to private or local addresses
+    (a self-hosted Ollama or vLLM). Off by default, so an organization cannot point the
+    platform's server at internal services.
     """
 
     database_url: str
@@ -44,6 +48,7 @@ class Settings:
     token_minutes: int = 60
     work_dir: Path = field(default_factory=lambda: Path("./mp-work"))
     controlplane: str | None = None  # host:port of the Go control plane, if deployed
+    guard_private_upstreams: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -64,6 +69,7 @@ class Settings:
             token_minutes=int(str(_env("MP_TOKEN_MINUTES", "60"))),
             work_dir=Path(str(_env("MP_WORK_DIR", "./mp-work"))),
             controlplane=_env("MP_CONTROLPLANE_ADDR"),
+            guard_private_upstreams=_env("MP_GUARD_ALLOW_PRIVATE_UPSTREAMS", "") in ("1", "true"),
         )
 
 

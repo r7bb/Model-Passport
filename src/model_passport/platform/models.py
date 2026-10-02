@@ -18,6 +18,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -192,7 +193,10 @@ class Model(Base):
 
 class ModelVersion(Base):
     __tablename__ = "model_versions"
-    __table_args__ = (UniqueConstraint("model_id", "version"),)
+    __table_args__ = (
+        UniqueConstraint("model_id", "version"),
+        Index("ix_versions_model", "model_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
@@ -267,6 +271,7 @@ class Job(Base):
     """Background work for workers (audit, remediate, report), claimed with row locks."""
 
     __tablename__ = "jobs"
+    __table_args__ = (Index("ix_jobs_status_created", "status", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
@@ -292,7 +297,10 @@ class AuditEvent(Base):
     """
 
     __tablename__ = "audit_events"
-    __table_args__ = (UniqueConstraint("tenant_id", "seq"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "seq"),
+        Index("ix_audit_tenant_seq", "tenant_id", "seq"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(36), doc="'platform' for platform-wide events.")
@@ -308,6 +316,61 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+# --- MP Guard: the privacy gateway between apps and AI models ---------------------------------
+
+
+class GuardKey(Base):
+    """An organization's API key for the guard endpoint. Only a hash of the secret is kept."""
+
+    __tablename__ = "guard_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200))
+    hint: Mapped[str] = mapped_column(String(32), doc="The key's start, to recognize it.")
+    secret_sha256: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GuardSettings(Base):
+    """Where the guard forwards requests, and its policy (one row per organization)."""
+
+    __tablename__ = "guard_settings"
+
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    upstream_url: Mapped[str] = mapped_column(String(500), default="https://api.openai.com/v1")
+    upstream_key: Mapped[bytes | None] = mapped_column(
+        LargeBinary, doc="The AI provider's key, encrypted with the tenant data key."
+    )
+    default_model: Mapped[str] = mapped_column(String(200), default="")
+    policy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[str | None] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class GuardEvent(Base):
+    """One request through the guard: what it did, by type. Never the values."""
+
+    __tablename__ = "guard_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    key_id: Mapped[str | None] = mapped_column(String(36))
+    source: Mapped[str] = mapped_column(String(16), default="api")  # api | scan | playground
+    model: Mapped[str] = mapped_column(String(200), default="")
+    outcome: Mapped[str] = mapped_column(String(16))  # passed | protected | blocked | error
+    upstream_status: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
 TENANT_TABLES = (
     "memberships",
     "datasets",
@@ -317,4 +380,7 @@ TENANT_TABLES = (
     "deployments",
     "test_reports",
     "jobs",
+    "guard_keys",
+    "guard_settings",
+    "guard_events",
 )

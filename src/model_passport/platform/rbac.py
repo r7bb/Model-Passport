@@ -37,6 +37,8 @@ class Permission(StrEnum):
     PROVENANCE_READ = "provenance.read"
     REPORTS_READ = "reports.read"
     JOBS_READ = "jobs.read"
+    GUARD_MANAGE = "guard.manage"  # API keys, the AI provider, and the policy
+    GUARD_READ = "guard.read"  # guard activity (counts by type, never values)
 
 
 P = Permission
@@ -52,13 +54,23 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             P.KILL_SWITCH,
             P.AUDIT_LOG_READ,
             P.REPORTS_READ,
+            P.GUARD_MANAGE,
+            P.GUARD_READ,
         }
     ),
     Role.ML_ENGINEER: frozenset(
-        _READ | {P.MODELS_WRITE, P.AUDITS_RUN, P.REMEDIATION_RUN, P.DEV_ENDPOINTS}
+        _READ
+        | {
+            P.MODELS_WRITE,
+            P.AUDITS_RUN,
+            P.REMEDIATION_RUN,
+            P.DEV_ENDPOINTS,
+            P.GUARD_MANAGE,
+            P.GUARD_READ,
+        }
     ),
     Role.COMPLIANCE_AUDITOR: frozenset(
-        _READ | {P.APPROVALS_DECIDE, P.KILL_SWITCH, P.AUDIT_LOG_READ, P.REPORTS_READ}
+        _READ | {P.APPROVALS_DECIDE, P.KILL_SWITCH, P.AUDIT_LOG_READ, P.REPORTS_READ, P.GUARD_READ}
     ),
     Role.CANARY_TESTER: frozenset({P.MODELS_READ, P.DEV_ENDPOINTS, P.TEST_REPORTS}),
     Role.END_CONSUMER: frozenset({P.CONSUMER_USE}),
