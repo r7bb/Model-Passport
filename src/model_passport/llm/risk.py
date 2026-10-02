@@ -66,10 +66,13 @@ def attack_strength(
     controls: Sequence[float] | np.ndarray,
     levels: Sequence[float] = FPR_LEVELS,
 ) -> tuple[float, dict[str, float]]:
-    """(AUC, {fpr: tpr}) of separating members from controls; NaN scores are dropped."""
+    """(AUC, {fpr: tpr}) of separating members from controls.
+
+    Non-finite (NaN, ±inf) scores are dropped.
+    """
     member = np.asarray(members, dtype=float)
     control = np.asarray(controls, dtype=float)
-    member, control = member[~np.isnan(member)], control[~np.isnan(control)]
+    member, control = member[np.isfinite(member)], control[np.isfinite(control)]
     if not member.size or not control.size:
         return float("nan"), {}
     labels = np.concatenate([np.ones(member.size), np.zeros(control.size)])

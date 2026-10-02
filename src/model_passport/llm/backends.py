@@ -330,7 +330,9 @@ def load_model(spec: str, device: str | None = None) -> ScoringModel | Generatio
 
 
 def logmeanexp(values: Sequence[float]) -> float:
-    """log(mean(exp(values))), computed stably."""
+    """log(mean(exp(values))), computed stably; all -inf gives -inf and any +inf gives +inf."""
     array = np.asarray(values, dtype=float)
     top = float(array.max())
+    if not math.isfinite(top):
+        return top
     return top + math.log(float(np.mean(np.exp(array - top))))

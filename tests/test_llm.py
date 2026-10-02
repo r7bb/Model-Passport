@@ -7,6 +7,7 @@ without network access and no real personal data is involved.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,7 @@ from model_passport.core import identity
 from model_passport.core.schema import EntityAuditResult, Severity
 from model_passport.llm import entities, synthetic
 from model_passport.llm.audit import AuditSettings, audit
-from model_passport.llm.backends import ModelError, Scored
+from model_passport.llm.backends import ModelError, Scored, logmeanexp
 from model_passport.llm.evidence import gather
 from model_passport.llm.methods import Parts, Sample, min_k, reference_set
 from model_passport.llm.references import ReferenceSampler, shape
@@ -153,6 +154,35 @@ def test_attack_strength_reports_auc_and_low_fpr_rates() -> None:
     assert rates == {"0.001": 1.0, "0.01": 1.0, "0.05": 1.0}
     chance, _ = attack_strength([1, 2, 3, 4], [1, 2, 3, 4])
     assert chance == 0.5
+
+
+@pytest.mark.parametrize(
+    ("members", "controls", "kept_members", "kept_controls"),
+    [
+        ([1, math.inf, 2, 3], [0, -math.inf, -1], [1, 2, 3], [0, -1]),
+        ([1, -math.inf, 2, 3], [0, math.inf, -1], [1, 2, 3], [0, -1]),
+        ([1, math.nan, math.inf, 2], [0, -math.inf, -1], [1, 2], [0, -1]),
+    ],
+)
+def test_attack_strength_drops_infinite_scores(
+    members: list[float],
+    controls: list[float],
+    kept_members: list[float],
+    kept_controls: list[float],
+) -> None:
+    assert attack_strength(members, controls) == attack_strength(kept_members, kept_controls)
+
+
+@pytest.mark.parametrize(
+    ("members", "controls"),
+    [([math.inf, -math.inf], [0, 1]), ([0, 1], [math.inf, -math.inf])],
+)
+def test_attack_strength_is_nan_when_no_finite_scores_remain(
+    members: list[float], controls: list[float]
+) -> None:
+    auc, rates = attack_strength(members, controls)
+    assert math.isnan(auc)
+    assert rates == {}
 
 
 def test_evidence_picks_the_informative_method_by_cross_fitting() -> None:
@@ -299,6 +329,45 @@ def test_probing_flags_values_a_model_reproduces() -> None:
     # false-positive rate shows the attack finds exactly those, with no false alarms.
     rounding = 1e-3  # rates are stored to four decimals
     assert result.tpr_at_fpr["0.001"] >= len(leaked_ids) / result.entities_audited - rounding
+
+
+# --- logmeanexp --------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ([0.0, math.log(3)], math.log(2)),
+        ([-2.5], -2.5),
+        ([1000.0, 1000.0], 1000.0),  # the naive form overflows
+        ([-1000.0, -1000.0 + math.log(3)], -1000.0 + math.log(2)),  # the naive form underflows
+        ([-math.inf, 0.0], -math.log(2)),
+    ],
+)
+def test_logmeanexp_is_the_stable_log_of_the_mean_of_exponentials(
+    values: list[float], expected: float
+) -> None:
+    assert logmeanexp(values) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ([-math.inf, -math.inf], -math.inf),
+        ([math.inf, 0.0], math.inf),
+        ([math.inf, math.inf], math.inf),
+        ([math.inf, -math.inf], math.inf),
+    ],
+)
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+def test_logmeanexp_returns_infinite_extremes_without_nan_or_warnings(
+    values: list[float], expected: float
+) -> None:
+    assert logmeanexp(values) == expected
+
+
+def test_logmeanexp_propagates_nan() -> None:
+    assert math.isnan(logmeanexp([math.nan, 0.0]))
 
 
 # --- API backends ------------------------------------------------------------------------------
