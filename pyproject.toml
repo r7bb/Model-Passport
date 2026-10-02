@@ -156,3 +156,7 @@ module = ["torch.*", "transformers.*", "tokenizers.*", "safetensors.*", "faker.*
           "botocore.*", "pgserver.*", "grpc.*", "model_passport.platform.rpc.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
