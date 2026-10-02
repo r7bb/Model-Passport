@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+
 import { type ChainStatus, EventLog } from "@/components/EventLog";
 import { PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { load } from "@/lib/session";
 import type { AuditEvent } from "@/lib/types";
+
+export const metadata: Metadata = { title: "Audit log" };
 
 /** M4: the organization's tamper-evident record of every action. */
 export default async function AuditLogPage({ params }: PageProps<"/o/[org]/audit-log">) {

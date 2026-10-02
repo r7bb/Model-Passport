@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { Card, Notice, PageHeader, Stat, StateBadge, Table, Td, TextLink } from "@/components/ui";
 import { api } from "@/lib/api";
 import { type State, can, formatDate } from "@/lib/platform";
 import { load, requireMember } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Overview" };
 
 type Dashboard = {
   organization: { slug: string; name: string; plan: string };

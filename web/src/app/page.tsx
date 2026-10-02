@@ -1,6 +1,10 @@
+import type { Metadata } from "next";
+
 import { redirect } from "next/navigation";
 
 import { requireMe } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Home" };
 
 /** Send each person to where they work: the platform console or their organization. */
 export default async function Home() {

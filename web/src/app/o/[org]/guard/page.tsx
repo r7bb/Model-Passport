@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+
 import { Badge, Card, Notice, PageHeader, Stat, Table, Td, TextLink } from "@/components/ui";
 import { api } from "@/lib/api";
 import { OUTCOME_TONE, describeReport, fillDays, quickstart } from "@/lib/guard";
 import { formatDate } from "@/lib/platform";
 import { load } from "@/lib/session";
 import type { GuardEvent, GuardSettings, GuardStats } from "@/lib/types";
+
+export const metadata: Metadata = { title: "Guard" };
 
 const DAYS = 7;
 const RECENT = 20;

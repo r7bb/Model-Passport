@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { ActionForm } from "@/components/ActionForm";
 import { Badge, Card, Field, PageHeader, Table, Td, TextLink, inputClass } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -6,6 +8,8 @@ import { load, requireMember } from "@/lib/session";
 import type { Model } from "@/lib/types";
 
 import { registerModel } from "../actions";
+
+export const metadata: Metadata = { title: "Models" };
 
 /** M5: the organization's models, open-weight or behind an API. */
 export default async function ModelsPage({ params }: PageProps<"/o/[org]/models">) {

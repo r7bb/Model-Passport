@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { ActionForm } from "@/components/ActionForm";
 import { Badge, Card, Field, PageHeader, Table, Td, inputClass } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -6,6 +8,8 @@ import { load } from "@/lib/session";
 import type { Tenant } from "@/lib/types";
 
 import { addOrgAdmin, createTenant, updateTenant } from "./actions";
+
+export const metadata: Metadata = { title: "Platform console" };
 
 const PLANS = ["free", "team", "enterprise"] as const;
 

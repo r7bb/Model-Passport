@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { ActionForm } from "@/components/ActionForm";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { Lifecycle } from "@/components/Lifecycle";
@@ -8,6 +10,8 @@ import { load, requireMember } from "@/lib/session";
 import type { Dataset, ModelDetail } from "@/lib/types";
 
 import { generateReport, registerVersion, rollback } from "../../actions";
+
+export const metadata: Metadata = { title: "Model" };
 
 const BUSY = new Set(["auditing", "remediating"]);
 

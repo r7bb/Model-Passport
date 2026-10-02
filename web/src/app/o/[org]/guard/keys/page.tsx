@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { ActionForm } from "@/components/ActionForm";
 import { Badge, Card, Field, PageHeader, Table, Td, inputClass } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -6,6 +8,8 @@ import { load, requireMember } from "@/lib/session";
 import type { GuardKey } from "@/lib/types";
 
 import { createKey, revokeKey } from "../actions";
+
+export const metadata: Metadata = { title: "Guard API keys" };
 
 /** API keys your apps use to call MP Guard. */
 export default async function KeysPage({ params }: PageProps<"/o/[org]/guard/keys">) {

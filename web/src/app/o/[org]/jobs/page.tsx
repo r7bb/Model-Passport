@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { Badge, PageHeader, Table, Td, type Tone } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/platform";
 import { load } from "@/lib/session";
 import type { Job } from "@/lib/types";
+
+export const metadata: Metadata = { title: "Jobs" };
 
 const TONE: Record<Job["status"], Tone> = {
   queued: "neutral",

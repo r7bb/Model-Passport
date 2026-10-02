@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { ActionForm } from "@/components/ActionForm";
 import { Card, Field, PageHeader, Table, Td, inputClass } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -6,6 +8,8 @@ import { load, requireMember } from "@/lib/session";
 import type { Member } from "@/lib/types";
 
 import { addMember, changeRole, removeMember } from "../actions";
+
+export const metadata: Metadata = { title: "Members" };
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[];
 

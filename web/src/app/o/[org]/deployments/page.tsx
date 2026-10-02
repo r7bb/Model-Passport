@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+
 import { Badge, Notice, PageHeader, Table, Td } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { formatDate } from "@/lib/platform";
 import { load } from "@/lib/session";
 import type { Deployment } from "@/lib/types";
+
+export const metadata: Metadata = { title: "Deployments" };
 
 /** M8: what serves where. Developer endpoints for canary testing; consumer endpoints once released. */
 export default async function DeploymentsPage({ params }: PageProps<"/o/[org]/deployments">) {

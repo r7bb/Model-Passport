@@ -1,7 +1,11 @@
+import type { Metadata } from "next";
+
 import { Badge, Card, PageHeader, Stat, Table, Td } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatAuc, formatDate } from "@/lib/platform";
 import { load } from "@/lib/session";
+
+export const metadata: Metadata = { title: "Analytics" };
 
 type Analytics = {
   risk_over_time: {

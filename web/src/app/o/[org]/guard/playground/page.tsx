@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
+
 import { Playground } from "@/components/Playground";
 import { Notice, PageHeader, TextLink } from "@/components/ui";
 import { api } from "@/lib/api";
 import { can } from "@/lib/platform";
 import { load, requireMember } from "@/lib/session";
 import type { GuardSettings } from "@/lib/types";
+
+export const metadata: Metadata = { title: "Guard playground" };
 
 /** Try MP Guard on a message before connecting an app. */
 export default async function PlaygroundPage({ params }: PageProps<"/o/[org]/guard/playground">) {

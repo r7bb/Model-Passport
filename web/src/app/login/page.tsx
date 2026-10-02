@@ -5,7 +5,7 @@ import { Field, inputClass } from "@/components/ui";
 
 import { signIn } from "../auth";
 
-export const metadata: Metadata = { title: "Sign in · Model Passport" };
+export const metadata: Metadata = { title: "Sign in" };
 
 export default function LoginPage() {
   return (

@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { ActionForm } from "@/components/ActionForm";
 import { Card, Field, Notice, PageHeader, Table, Td, inputClass } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -6,6 +8,8 @@ import { load, requireMember } from "@/lib/session";
 import type { GuardAction, GuardSettings } from "@/lib/types";
 
 import { saveSettings } from "../actions";
+
+export const metadata: Metadata = { title: "Guard settings" };
 
 const LABELS: Record<GuardAction, string> = {
   mask: "Mask: hide it, put it back in the reply",

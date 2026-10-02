@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
+
 import { type ChainStatus, EventLog } from "@/components/EventLog";
 import { PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { load } from "@/lib/session";
 import type { AuditEvent } from "@/lib/types";
+
+export const metadata: Metadata = { title: "Platform audit log" };
 
 export default async function PlatformLogPage() {
   const [events, status] = await Promise.all([

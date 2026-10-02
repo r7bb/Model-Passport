@@ -3,8 +3,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Model Passport",
-  description: "Entity-level PII leakage auditing and remediation for machine learning models.",
+  title: { default: "Model Passport", template: "%s · Model Passport" },
+  description:
+    "Model Passport finds the personal data a machine learning model has memorized, removes it, checks the model again, and records each step in a signed passport.",
+  // A private console: keep every page out of search engines.
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
