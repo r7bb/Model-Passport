@@ -43,4 +43,31 @@ Used by `model_passport.llm.public_data` for the public accuracy benchmark. The 
 | Presidio | MIT | Free-text PII detection |
 | Faker | MIT | Synthetic demo data |
 
+## Other optional and web dependencies (to be confirmed)
+
+Copied as-is from the installed packages' own metadata (Python `License-Expression`, else `License`, else the license classifier; npm `license`). Not yet reviewed; confirm each against the package's license file before release.
+
+| Package | Version installed | Metadata says |
+|---|---|---|
+| torch | 2.14.0 | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT |
+| transformers | 5.17.0 | Apache 2.0 License |
+| tokenizers | 0.23.2 | Apache Software License (classifier) |
+| safetensors | 0.8.0 | Apache Software License (classifier) |
+| httpx | 0.28.1 | BSD-3-Clause |
+| SQLAlchemy | 2.0.54 | MIT |
+| alembic | 1.20.0 | MIT |
+| psycopg | 3.3.6 | LGPL-3.0-only |
+| PyJWT | 2.15.0 | MIT |
+| argon2-cffi | 25.1.0 | MIT |
+| boto3 | 1.43.103 | Apache-2.0 |
+| python-multipart | 0.0.32 | Apache-2.0 |
+| grpcio | 1.84.0 | Apache-2.0 |
+| protobuf | 7.36.2 | 3-Clause BSD License |
+| mlflow | 3.16.1 | "Copyright 2018 Databricks, Inc.  All rights reserved." (license field); Apache Software License (classifier) |
+| presidio-analyzer | not installed | not checked |
+| next | 16.3.6 | MIT |
+| react | 19.2.8 | MIT |
+| react-dom | 19.2.8 | MIT |
+| server-only | 0.0.1 | MIT |
+
 Vulnerability severities are retrieved from the [OSV](https://osv.dev) database (CC-BY-4.0 data, GitHub Advisory Database records).
