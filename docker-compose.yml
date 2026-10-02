@@ -67,7 +67,7 @@ services:
   registry:
     build: .
     environment:
-      PASSPORT_REGISTRY_TOKEN: ${PASSPORT_REGISTRY_TOKEN:-}
+      PASSPORT_REGISTRY_TOKEN: ${PASSPORT_REGISTRY_TOKEN:-dev-only-registry-token}
       PASSPORT_TRUSTED_KEYS: /keys
     ports: ["8000:8000"]
     volumes:

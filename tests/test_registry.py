@@ -25,7 +25,10 @@ def built(project: Path) -> tuple[dict, str, identity.Ed25519PrivateKey]:
 
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(tmp_path / "registry.db", token=""))
+    return TestClient(
+        create_app(tmp_path / "registry.db", token=TOKEN),
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
 
 
 def _upload(client: TestClient, document: dict, pem: str, **headers: str):
@@ -83,6 +86,39 @@ def test_token_required_for_writes(tmp_path: Path, built: tuple) -> None:
     assert client.get("/passports").status_code == 200  # reads stay open
 
 
+def test_writes_refused_when_no_token_configured(
+    tmp_path: Path, built: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document, pem, key = built
+    pid = document["identity"]["passport_id"]
+    monkeypatch.delenv("PASSPORT_REGISTRY_TOKEN", raising=False)
+    for no_token in ("", None):
+        client = TestClient(create_app(tmp_path / f"r-{no_token}.db", token=no_token))
+        refused = _upload(client, document, pem)
+        assert refused.status_code == 503
+        assert "no write token configured" in refused.json()["detail"]
+        # A bearer header cannot unlock an unconfigured registry.
+        assert _upload(client, document, pem, Authorization="Bearer ").status_code == 503
+        event = append_event(json.loads(json.dumps(document)), "drift_check", {}, key)
+        assert client.post(f"/passports/{pid}/events", json={"event": event}).status_code == 503
+        assert client.get("/passports").json() == []  # nothing was stored; reads still work
+        assert client.get("/health").status_code == 200
+
+
+def test_events_require_the_token(tmp_path: Path, built: tuple) -> None:
+    document, pem, key = built
+    pid = document["identity"]["passport_id"]
+    client = TestClient(create_app(tmp_path / "r.db", token=TOKEN))
+    good = {"Authorization": f"Bearer {TOKEN}"}
+    assert _upload(client, document, pem, **good).status_code == 201
+    event = append_event(json.loads(json.dumps(document)), "drift_check", {}, key)
+    url = f"/passports/{pid}/events"
+    assert client.post(url, json={"event": event}).status_code == 401
+    wrong = {"Authorization": "Bearer wrong"}
+    assert client.post(url, json={"event": event}, headers=wrong).status_code == 401
+    assert client.post(url, json={"event": event}, headers=good).status_code == 200
+
+
 def test_events_must_extend_the_chain(client: TestClient, built: tuple) -> None:
     document, pem, key = built
     pid = document["identity"]["passport_id"]
@@ -125,8 +161,8 @@ def test_trusted_keys(tmp_path: Path, project: Path, built: tuple) -> None:
     trusted = tmp_path / "trusted"
     trusted.mkdir()
     (trusted / "team.pub").write_text(pem)
-    client = TestClient(create_app(tmp_path / "t.db", token="", trusted_keys_dir=str(trusted)))
-    _upload(client, document, pem)
+    client = TestClient(create_app(tmp_path / "t.db", token=TOKEN, trusted_keys_dir=str(trusted)))
+    assert _upload(client, document, pem, Authorization=f"Bearer {TOKEN}").status_code == 201
     pid = document["identity"]["passport_id"]
     assert client.get(f"/passports/{pid}/verify").json()["key_trusted"] is True
 

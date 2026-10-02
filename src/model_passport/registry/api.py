@@ -3,7 +3,8 @@
 Run with ``passport serve`` (or ``uvicorn model_passport.registry.api:app``). Configuration:
 
 * ``PASSPORT_REGISTRY_DB``: SQLite path (default ``registry.db``)
-* ``PASSPORT_REGISTRY_TOKEN``: if set, uploads and event appends need ``Authorization: Bearer``
+* ``PASSPORT_REGISTRY_TOKEN``: required for writes. Uploads and event appends need
+  ``Authorization: Bearer``; with no token configured they are refused (503). Reads stay open.
 * ``PASSPORT_TRUSTED_KEYS``: directory of trusted ``*.pub`` keys; verification reports whether
   the signing key is among them
 """
@@ -112,7 +113,9 @@ Context = Annotated[RegistryContext, Depends(get_context)]
 
 def require_token(context: Context, authorization: Annotated[str | None, Header()] = None) -> None:
     if context.token is None:
-        return
+        raise HTTPException(
+            503, "registry has no write token configured; set PASSPORT_REGISTRY_TOKEN"
+        )
     supplied = (authorization or "").removeprefix("Bearer ").strip()
     if not hmac.compare_digest(supplied.encode(), context.token.encode()):
         raise HTTPException(401, "missing or invalid bearer token")
@@ -261,7 +264,7 @@ def create_app(
     token: str | None = None,
     trusted_keys_dir: str | None = None,
 ) -> FastAPI:
-    # An empty token (argument or environment) disables write authentication.
+    # An empty token (argument or environment) means none is configured: writes fail closed.
     resolved_token = (
         token if token is not None else os.environ.get("PASSPORT_REGISTRY_TOKEN")
     ) or None
