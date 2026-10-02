@@ -19,6 +19,7 @@ build/
 data/
 models/
 !web/src/**/models/
+!web/src/**/data/
 mlruns/
 mlflow.db
 /passport.json
