@@ -18,6 +18,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Annotated, Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -141,17 +142,56 @@ def _is_count(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
+def _pinned_targets(url: str, allow_private: bool) -> list[tuple[str, dict[str, Any]]]:
+    """Where to send the request: ``(url, request options)`` per address that passed the check.
+
+    The name is resolved and every address checked now, at request time, then the connection is
+    pinned to the checked address so the HTTP client cannot resolve the name again (DNS
+    rebinding). The ``Host`` header and TLS server name stay the real ones, and TLS
+    verification stays on. When private networks are allowed there is nothing to check or pin.
+    """
+    if allow_private:
+        return [(url, {})]
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    blocked = RunStoppedError(502, "the provider address is not allowed", "provider_blocked")
+    if parts.scheme != "https":
+        raise blocked
+    try:
+        addresses = service.public_addresses(host, parts.port or 443)
+    except service.GuardError as exc:
+        raise blocked from exc
+    shown = f"[{host}]" if ":" in host else host
+    netloc = f"{shown}:{parts.port}" if parts.port else shown
+    targets = []
+    for address in addresses:
+        literal = f"[{address}]" if ":" in address else address
+        pinned = parts._replace(netloc=f"{literal}:{parts.port}" if parts.port else literal)
+        options = {"headers": {"Host": netloc}, "extensions": {"sni_hostname": host}}
+        targets.append((urlunsplit(pinned), options))
+    return targets
+
+
 def _forward(
     app: AppState, url: str, key: str, payload: dict[str, Any]
 ) -> tuple[int, dict[str, Any]]:
-    try:
-        response = app.guard_http.post(
-            f"{url}/chat/completions", json=payload, headers={"Authorization": f"Bearer {key}"}
-        )
-    except httpx.HTTPError as exc:
-        raise RunStoppedError(
-            502, f"provider unreachable ({type(exc).__name__})", "provider_unreachable"
-        ) from exc
+    targets = _pinned_targets(url, app.settings.guard_private_upstreams)
+    response = None
+    for target, options in targets:
+        try:
+            response = app.guard_http.post(
+                f"{target}/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {key}", **options.get("headers", {})},
+                extensions=options.get("extensions"),
+            )
+            break
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            failure: httpx.HTTPError = exc  # try the next checked address
+        except httpx.HTTPError as exc:
+            raise _unreachable(exc) from exc
+    if response is None:
+        raise _unreachable(failure)
     try:
         completion = response.json()
     except ValueError as exc:
@@ -165,6 +205,12 @@ def _forward(
             stop.payload = completion  # pass the provider's own error through
         raise stop
     return response.status_code, completion
+
+
+def _unreachable(exc: httpx.HTTPError) -> RunStoppedError:
+    return RunStoppedError(
+        502, f"provider unreachable ({type(exc).__name__})", "provider_unreachable"
+    )
 
 
 def _protect(

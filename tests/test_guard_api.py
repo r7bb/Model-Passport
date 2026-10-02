@@ -44,8 +44,10 @@ class FakeProvider:
     reply: str = "Done."
     received: list[dict[str, Any]] = field(default_factory=list)
     headers: list[dict[str, str]] = field(default_factory=list)
+    requests: list[httpx.Request] = field(default_factory=list)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
         self.received.append(json.loads(request.content))
         self.headers.append(dict(request.headers))
         message = {"role": "assistant", "content": self.reply}
@@ -318,6 +320,96 @@ def test_provider_addresses_on_private_networks_are_refused() -> None:
         check_upstream("http://localhost:11434/v1/", allow_private=True)
         == "http://localhost:11434/v1"
     )
+
+
+# --- The provider address is checked again on every request, and the connection is pinned ----
+
+PUBLIC_IP = "93.184.216.34"
+
+
+class FakeDns:
+    """Stands in for name resolution; ``answers`` can change between calls."""
+
+    def __init__(self, *answers: str) -> None:
+        self.answers = list(answers)
+
+    def __call__(self, host: str, port: int) -> list[str]:
+        return list(self.answers)
+
+
+def _strict(g: Guarded, monkeypatch: pytest.MonkeyPatch, dns: FakeDns) -> dict[str, str]:
+    """Turn the private-network allowance off, as in production, and save the settings."""
+    state = g.client.app.state.mp  # type: ignore[attr-defined]
+    state.settings = dataclasses.replace(state.settings, guard_private_upstreams=False)
+    monkeypatch.setattr(service, "resolve_host", dns)
+    admin = g.login("admin@acme.test")
+    _configure(g, admin)
+    return g.call("POST", "/guard/keys", admin, 201, json={"name": "k"})  # type: ignore[no-any-return]
+
+
+@pytest.mark.parametrize("rebound", ["127.0.0.1", "169.254.169.254", "::1", "10.0.0.5"])
+def test_a_host_that_later_resolves_privately_is_refused_and_never_called(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch, rebound: str
+) -> None:
+    dns = FakeDns(PUBLIC_IP)
+    key = _strict(guarded, monkeypatch, dns)["key"]
+    dns.answers = [rebound]
+    reply = guarded.chat(key, "hello", expect=502)
+    assert reply.json()["error"]["code"] == "provider_blocked"
+    assert rebound not in reply.text
+    assert guarded.provider.requests == []
+
+
+def test_a_mixed_public_and_private_answer_is_refused(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dns = FakeDns(PUBLIC_IP)
+    key = _strict(guarded, monkeypatch, dns)["key"]
+    dns.answers = [PUBLIC_IP, "127.0.0.1"]
+    guarded.chat(key, "hello", expect=502)
+    assert guarded.provider.requests == []
+
+
+def test_a_host_that_stops_resolving_is_refused(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dns = FakeDns(PUBLIC_IP)
+    key = _strict(guarded, monkeypatch, dns)["key"]
+    dns.answers = []
+    guarded.chat(key, "hello", expect=502)
+    assert guarded.provider.requests == []
+
+
+@pytest.mark.parametrize(
+    ("address", "netloc"), [(PUBLIC_IP, PUBLIC_IP), ("2606:4700::1111", "[2606:4700::1111]")]
+)
+def test_the_request_goes_to_the_checked_address_with_the_real_name(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch, address: str, netloc: str
+) -> None:
+    key = _strict(guarded, monkeypatch, FakeDns(address))["key"]
+    guarded.chat(key, "hello")
+    (request,) = guarded.provider.requests
+    assert request.url.scheme == "https"
+    assert request.url.netloc.decode() == netloc
+    assert request.url.path == "/v1/chat/completions"
+    assert request.headers["host"] == "provider.test"
+    assert request.extensions["sni_hostname"] == "provider.test"
+    assert request.headers["authorization"] == f"Bearer {PROVIDER_KEY}"
+
+
+def test_a_private_upstream_is_still_allowed_when_the_operator_permits_it(
+    guarded: Guarded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "resolve_host", FakeDns("127.0.0.1"))
+    key = _configure_key(guarded)
+    guarded.chat(key, "hello")
+    assert len(guarded.provider.requests) == 1
+
+
+def _configure_key(g: Guarded) -> str:
+    admin = g.login("admin@acme.test")
+    _configure(g, admin)
+    return g.call("POST", "/guard/keys", admin, 201, json={"name": "k"})["key"]  # type: ignore[no-any-return]
 
 
 # --- Limits on the proxy: body size, max_tokens, n, and request rates -------------------------

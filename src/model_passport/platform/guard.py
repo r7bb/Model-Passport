@@ -143,6 +143,15 @@ def _context(tenant_id: str) -> bytes:
     return b"guard-upstream-key:" + tenant_id.encode()
 
 
+def resolve_host(host: str, port: int) -> list[str]:
+    """Every address the name resolves to (the one place name resolution happens)."""
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise GuardError(f"cannot resolve {host}") from exc
+    return [str(info[4][0]) for info in infos]
+
+
 def check_upstream(url: str, allow_private: bool = False) -> str:
     """An acceptable provider address (``https://host/v1``), normalized without a trailing /."""
     parts = urlsplit(url.strip())
@@ -152,15 +161,22 @@ def check_upstream(url: str, allow_private: bool = False) -> str:
         return url.strip().rstrip("/")
     if parts.scheme != "https":
         raise GuardError("the provider address must use https")
-    try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
-    except OSError as exc:
-        raise GuardError(f"cannot resolve {parts.hostname}") from exc
-    for info in infos:
-        address = ipaddress.ip_address(info[4][0])
-        if not address.is_global:
-            raise GuardError("the provider address points to a private or local network")
+    public_addresses(parts.hostname, parts.port or 443)
     return url.strip().rstrip("/")
+
+
+def public_addresses(host: str, port: int) -> list[str]:
+    """Every address ``host`` resolves to; refuses if there are none or any is not global.
+
+    One rule for both the save-time check and the check made when a request is forwarded.
+    """
+    addresses = resolve_host(host, port)
+    if not addresses:
+        raise GuardError(f"cannot resolve {host}")
+    for text in addresses:
+        if not ipaddress.ip_address(text).is_global:
+            raise GuardError("the provider address points to a private or local network")
+    return addresses
 
 
 @dataclass(frozen=True)
