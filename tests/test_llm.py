@@ -20,12 +20,18 @@ from model_passport.cli import app
 from model_passport.core import identity
 from model_passport.core.schema import EntityAuditResult, Severity
 from model_passport.llm import entities, synthetic
-from model_passport.llm.audit import AuditSettings, audit
+from model_passport.llm.audit import AuditSettings, Target, _metrics, _Scores, audit
 from model_passport.llm.backends import ModelError, Scored, logmeanexp
 from model_passport.llm.evidence import gather
 from model_passport.llm.methods import Parts, Sample, min_k, reference_set
 from model_passport.llm.references import ReferenceSampler, shape
-from model_passport.llm.risk import attack_strength, benjamini_hochberg, entity_risk, severity
+from model_passport.llm.risk import (
+    attack_strength,
+    benjamini_hochberg,
+    entity_risk,
+    non_finite_counts,
+    severity,
+)
 from model_passport.llm.sanitize import risky_spans, sanitize
 
 runner = CliRunner()
@@ -183,6 +189,46 @@ def test_attack_strength_is_nan_when_no_finite_scores_remain(
     auc, rates = attack_strength(members, controls)
     assert math.isnan(auc)
     assert rates == {}
+
+
+def test_non_finite_counts_counts_nan_and_infinities_on_both_sides() -> None:
+    members = [1.0, math.nan, math.inf, 2.0]
+    controls = [0.0, -math.inf, math.nan, math.nan, -1.0]
+    assert non_finite_counts(members, controls) == (2, 3)
+
+
+def test_non_finite_counts_is_zero_for_finite_scores() -> None:
+    assert non_finite_counts([1, 2, 3], np.array([0.5, 0.25])) == (0, 0)
+
+
+def _metrics_inputs(
+    member: list[float], control: list[float]
+) -> tuple[list[Target], _Scores, np.ndarray, np.ndarray]:
+    """Three same-type targets, below MIN_TYPE_METRICS, with one method scoring them."""
+    text = "Name: Ada Lovelace"
+    span = entities.Span(6, len(text), "PERSON")
+    record = entities.Record("r", text, [span])
+    sample = Sample(text[:6], text[6:], "")
+    found = [Target(record, span, sample) for _ in member]
+    scores = _Scores()
+    scores.member["loss"] = list(member)
+    scores.control["loss"] = list(control)
+    return found, scores, np.asarray(member, dtype=float), np.asarray(control, dtype=float)
+
+
+def test_metrics_warns_when_scores_are_non_finite() -> None:
+    found, scores, member, control = _metrics_inputs([1.0, math.inf, 3.0], [0.0, 0.5, math.nan])
+    with pytest.warns(RuntimeWarning, match="non-finite") as caught:
+        _metrics(found, scores, "loss", member, control)
+    messages = [str(w.message) for w in caught]
+    assert "loss: 1 member and 1 control scores were non-finite" in messages[0]
+    assert any("loss (overall): 1 member and 1 control" in message for message in messages)
+
+
+@pytest.mark.filterwarnings("error::RuntimeWarning")
+def test_metrics_is_silent_when_every_score_is_finite() -> None:
+    found, scores, member, control = _metrics_inputs([1.0, 2.0, 3.0], [0.0, 0.5, 0.2])
+    _metrics(found, scores, "loss", member, control)
 
 
 def test_evidence_picks_the_informative_method_by_cross_fitting() -> None:

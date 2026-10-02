@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import random
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ from model_passport.llm.risk import (
     attack_strength,
     benjamini_hochberg,
     entity_risk,
+    non_finite_counts,
     severity,
 )
 
@@ -272,14 +274,29 @@ def _probe_p_values(member: list[float], control: list[float], samples: int) -> 
     return np.asarray(binom.sf(hits - 1, samples, rate), dtype=float)
 
 
+def _warn_dropped(
+    method: str, members: Sequence[float] | np.ndarray, controls: Sequence[float] | np.ndarray
+) -> None:
+    dropped_members, dropped_controls = non_finite_counts(members, controls)
+    if dropped_members or dropped_controls:
+        warnings.warn(
+            f"{method}: {dropped_members} member and {dropped_controls} control scores "
+            "were non-finite and left out of the AUC",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+
 def _metrics(
     found: list[Target], scores: _Scores, primary: str, member: np.ndarray, control: np.ndarray
 ) -> tuple[list[MethodMetrics], float | None, dict[str, float]]:
     """Per-method strength, the primary evidence overall, and the primary per entity type."""
     metrics = []
     for name in scores.member:
+        _warn_dropped(name, scores.member[name], scores.control[name])
         auc, rates = attack_strength(scores.member[name], scores.control[name])
         metrics.append(MethodMetrics(method=name, auc=auc, tpr_at_fpr=rates))
+    _warn_dropped(f"{primary} (overall)", member, control)
     overall_auc, overall_rates = attack_strength(member, control)
     by_type: dict[str, list[int]] = defaultdict(list)
     for i, target in enumerate(found):

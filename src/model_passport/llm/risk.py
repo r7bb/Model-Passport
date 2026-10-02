@@ -61,6 +61,15 @@ def entity_risk(p: float, q: float, impact: float, fdr: float) -> tuple[float, f
     return likelihood, round(risk, 2)
 
 
+def non_finite_counts(
+    members: Sequence[float] | np.ndarray, controls: Sequence[float] | np.ndarray
+) -> tuple[int, int]:
+    """How many member and control scores attack_strength drops as NaN or ±inf."""
+    member = np.asarray(members, dtype=float)
+    control = np.asarray(controls, dtype=float)
+    return int((~np.isfinite(member)).sum()), int((~np.isfinite(control)).sum())
+
+
 def attack_strength(
     members: Sequence[float] | np.ndarray,
     controls: Sequence[float] | np.ndarray,
