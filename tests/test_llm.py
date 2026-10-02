@@ -234,8 +234,8 @@ def test_metrics_is_silent_when_every_score_is_finite() -> None:
 def test_evidence_picks_the_informative_method_by_cross_fitting() -> None:
     rng = np.random.default_rng(0)
     n = 400
-    member = {"weak": rng.normal(0, 1, n), "strong": rng.normal(2.5, 1, n)}
-    control = {"weak": rng.normal(0, 1, n), "strong": rng.normal(0, 1, n)}
+    member = {"weak": rng.normal(0, 1, n).tolist(), "strong": rng.normal(2.5, 1, n).tolist()}
+    control = {"weak": rng.normal(0, 1, n).tolist(), "strong": rng.normal(0, 1, n).tolist()}
     evidence = gather(["EMAIL"] * n, member, control, "auto", seed=0)
     assert evidence.primary == "strong"
     assert evidence.p[np.argmax(evidence.z)] < 1e-3
